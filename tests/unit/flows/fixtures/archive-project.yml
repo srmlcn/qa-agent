@@ -1,0 +1,73 @@
+version: 1
+
+id: project.archive
+name: Archive an active project
+
+objective: >
+  A signed-in project owner can archive an active project and
+  the archived state persists after reload.
+
+authProfile: project-owner
+
+inputs:
+  projectName:
+    type: string
+    required: true
+
+steps:
+  - id: open-project-options
+    intent: Open the options menu for the target project.
+    action: click
+    locator:
+      type: role
+      role: button
+      name: "Options for ${projectName}"
+    semanticFallback: >
+      Find and open the actions or options menu associated with
+      the project named ${projectName}.
+
+  - id: select-archive
+    intent: Choose the archive operation.
+    action: click
+    locator:
+      type: role
+      role: menuitem
+      name: Archive
+    semanticFallback: >
+      Select the action that archives the current project.
+
+  - id: confirm-archive
+    intent: Confirm that the project should be archived.
+    action: click
+    locator:
+      type: role
+      role: button
+      name: Archive project
+    semanticFallback: >
+      Confirm the archive operation in the confirmation UI.
+
+assertions:
+  - id: project-not-active
+    type: not-visible
+    locator:
+      type: text
+      text: "${projectName}"
+
+  - id: persists-after-reload
+    type: custom-sequence
+    sequence:
+      - action: reload
+      - assert: not-visible
+        locator:
+          type: text
+          text: "${projectName}"
+
+evidence:
+  screenshots:
+    - after: confirm-archive
+  network:
+    capture: true
+  console:
+    errors: true
+  trace:
+    onFailure: true
