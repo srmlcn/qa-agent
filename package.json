@@ -1,0 +1,33 @@
+{
+  "name": "autonomous-qa",
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "autonomous-qa": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "playwright": "^1.55.0",
+    "yaml": "^2.8.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.18.0",
+    "eslint": "^9.36.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^3.2.0"
+  }
+}
