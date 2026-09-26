@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.autonomous-qa/artifacts/
+.autonomous-qa/runtime/
+playwright-report/
+test-results/
