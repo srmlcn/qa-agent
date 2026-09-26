@@ -8,8 +8,9 @@ import { commandsDirectory, loadCommands } from "../../../src/cli/registry.js";
 test("discovers help from the real commands directory", async () => {
   const commands = await loadCommands(commandsDirectory());
 
-  expect(commands.map((command) => command.name)).toEqual(["help"]);
+  expect(commands.map((command) => command.name)).toEqual(["help", "mcp"]);
   expect(commands[0]?.summary).toBe("list available commands");
+  expect(commands[1]?.summary).toBe("serve MCP tools over stdio");
 });
 
 test("unknown command path exits 1", async () => {
