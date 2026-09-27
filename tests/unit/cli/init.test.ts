@@ -199,7 +199,12 @@ test("init appears in help via autoload", async () => {
 
   try {
     const commands = await loadCommands();
-    expect(commands.map((item) => item.name)).toEqual(["help", "init", "mcp"]);
+    expect(commands.map((item) => item.name)).toEqual([
+      "doctor",
+      "help",
+      "init",
+      "mcp",
+    ]);
     expect(await main([])).toBe(0);
     expect(await main(["help"])).toBe(0);
     expect(log).toHaveBeenCalledWith("init  create project config and flows directory");
