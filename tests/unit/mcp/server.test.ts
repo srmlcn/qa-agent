@@ -230,7 +230,13 @@ test(
       send(child, { jsonrpc: "2.0", id: 2, method: "tools/list" });
       const listed = await readFrame();
       expect(listed.id).toBe(2);
-      expect(toolNames(listed.result).sort()).toEqual(["qa.ping", "qa.second"]);
+      expect(toolNames(listed.result).sort()).toEqual([
+        "qa.get_run",
+        "qa.list_flows",
+        "qa.ping",
+        "qa.second",
+        "qa.status",
+      ]);
 
       send(child, {
         jsonrpc: "2.0",

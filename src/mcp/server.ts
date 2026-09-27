@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { QaError } from "../errors/qa-error.js";
 import { version } from "../index.js";
 import { createLogger } from "../runtime/logger.js";
 import { loadTools, type McpTool } from "./load-tools.js";
@@ -32,10 +33,36 @@ function registerLoadedTool(server: McpServer, tool: McpTool): void {
       inputSchema: tool.schema,
     },
     async (args) => {
-      const result = await tool.handler(args);
-      return toToolResult(result);
+      try {
+        const result = await tool.handler(args);
+        return toToolResult(result);
+      } catch (error) {
+        if (error instanceof QaError) {
+          const failure: CallToolResult = {
+            isError: true,
+            content: [{ type: "text", text: JSON.stringify(error.toJSON()) }],
+          };
+          return failure;
+        }
+        throw error;
+      }
     },
   );
+}
+
+/** Loads tools and returns a server that is not yet connected to a transport. */
+export async function createMcpServer(): Promise<McpServer> {
+  const tools = await loadTools();
+  const server = new McpServer({
+    name: SERVER_NAME,
+    version,
+  });
+
+  for (const tool of tools) {
+    registerLoadedTool(server, tool);
+  }
+
+  return server;
 }
 
 function waitForStdinClose(): Promise<void> {
@@ -57,15 +84,7 @@ function waitForStdinClose(): Promise<void> {
 
 export async function serveMcp(): Promise<void> {
   const logger = createLogger();
-  const tools = await loadTools();
-  const server = new McpServer({
-    name: SERVER_NAME,
-    version,
-  });
-
-  for (const tool of tools) {
-    registerLoadedTool(server, tool);
-  }
+  const server = await createMcpServer();
 
   const closed = waitForStdinClose();
   const transport = new StdioServerTransport();
