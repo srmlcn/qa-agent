@@ -12,6 +12,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:integration": "node --input-type=module -e 'import { startVitest } from \"vitest/node\"; const filters = process.argv.slice(1); const ctx = await startVitest(\"test\", filters, { config: false, name: \"integration\", include: [\"tests/integration/**/*.test.ts\"], exclude: [\"node_modules/**\", \"tests/live/**\"], watch: false, testTimeout: 60000, hookTimeout: 30000 }); if (ctx.state.getFilepaths().length === 0 || ctx.state.getFailedFilepaths().length > 0) process.exit(1); process.exit(process.exitCode ?? 0);'",
+    "test:e2e": "node --input-type=module -e 'import { startVitest } from \"vitest/node\"; const filters = process.argv.slice(1); const ctx = await startVitest(\"test\", filters, { config: false, name: \"e2e\", include: [\"tests/e2e/**/*.test.ts\"], exclude: [\"node_modules/**\", \"tests/live/**\"], watch: false, testTimeout: 180000, hookTimeout: 30000 }); if (ctx.state.getFilepaths().length === 0 || ctx.state.getFailedFilepaths().length > 0) process.exit(1); process.exit(process.exitCode ?? 0);'",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },
