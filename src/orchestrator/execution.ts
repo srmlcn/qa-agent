@@ -4,7 +4,7 @@ import { startCapture, type CaptureSession } from "../evidence/network.js";
 import { startRun, type RunBuilder } from "../evidence/result.js";
 import { screenshotAfter } from "../evidence/screenshots.js";
 import { attach, createRunDir, writeRun } from "../evidence/store.js";
-import { startTrace, stopTrace } from "../evidence/traces.js";
+import { startTrace, stopTrace, type TraceMode } from "../evidence/traces.js";
 import type { RunResult } from "../evidence/types.js";
 import { QaError } from "../errors/qa-error.js";
 import { readProfilePath } from "../auth/store.js";
@@ -36,6 +36,12 @@ export type ExecuteFlowOptions = {
   config: ProjectConfig;
   /** Chromium stays headless unless this is true. */
   headed?: boolean;
+  /**
+   * When false, the in-progress trace is stopped with mode `off` and no zip is kept.
+   * When true, a failure trace is kept even if config trace is `off`.
+   * When omitted, `config.evidence.trace` decides.
+   */
+  collectTrace?: boolean;
 };
 
 export type ExecuteFlowResult = {
@@ -149,7 +155,7 @@ async function runSession(
     const trace = await stopTrace(session.context, {
       failed: result.status !== "passed",
       dest: runDir,
-      mode: options.config.evidence.trace,
+      mode: traceModeFor(options),
     });
     tracing = false;
     attach(result, {
@@ -160,6 +166,20 @@ async function runSession(
   } finally {
     await stopEvidence(capture, captureStopped, session, tracing, runDir, options);
   }
+}
+
+/**
+ * `false` discards the trace. `true` keeps one after a failure.
+ * An omitted flag leaves the project trace mode unchanged.
+ */
+function traceModeFor(options: ExecuteFlowOptions): TraceMode {
+  if (options.collectTrace === false) {
+    return "off";
+  }
+  if (options.collectTrace === true) {
+    return "on-failure";
+  }
+  return options.config.evidence.trace;
 }
 
 async function stopEvidence(
@@ -181,7 +201,7 @@ async function stopEvidence(
   await stopTrace(session.context, {
     failed: true,
     dest: runDir,
-    mode: options.config.evidence.trace,
+    mode: traceModeFor(options),
   }).catch(() => {
     // A trace that cannot be saved still leaves the recorded step result.
   });
