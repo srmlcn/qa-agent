@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -145,6 +146,30 @@ test("a disallowed startUrl throws POLICY_BLOCKED before launch", async () => {
   expect(extraPids(before)).toEqual([]);
   expect(profileExists("billing", "admin")).toBe(false);
 });
+
+test(
+  "a stdin line done completes capture",
+  async () => {
+    const pending = captureProfile({
+      projectId: "billing",
+      profile: "worker",
+      startUrl: "about:blank",
+    });
+    const emitDone = setInterval(() => {
+      process.stdin.emit("data", Buffer.from("done\n"));
+    }, 50);
+
+    try {
+      const result = await pending;
+      expect(result).toEqual({ profile: "worker", projectId: "billing" });
+      expect(JSON.stringify(result)).not.toContain(COOKIE_VALUE);
+      expect(profileExists("billing", "worker")).toBe(true);
+    } finally {
+      clearInterval(emitDone);
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
 
 test(
   "a ready file completes capture and is removed",
