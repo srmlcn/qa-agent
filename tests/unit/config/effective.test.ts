@@ -278,7 +278,7 @@ function writeProjectConfig(yaml: string): string {
 }
 
 function createProjectRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "qa-effective-project-"));
+  const root = mkdtempSync(join(tmpdir(), "qa-config-project-"));
   roots.push(root);
   return root;
 }
