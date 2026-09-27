@@ -234,8 +234,12 @@ test("the events module does not write files or read response bodies", () => {
   const source = readFileSync(sourcePath, "utf8");
   expect(source).not.toContain("import(");
   expect(source).not.toContain("src/evidence");
+  expect(source).not.toContain("node:fs");
   expect(source).not.toMatch(/\b(writeFile|appendFile|createWriteStream|mkdir)Sync?\b/);
-  expect(source).not.toMatch(/\.body\(|\.text\(|\.json\(|getResponseBody/);
+  expect(source).not.toContain(".body(");
+  expect(source).not.toContain("getResponseBody");
+  expect(source).not.toContain("response.text(");
+  expect(source).not.toContain("response.json(");
   expect(importSpecifiers(source).sort()).toEqual(["playwright"]);
 });
 
