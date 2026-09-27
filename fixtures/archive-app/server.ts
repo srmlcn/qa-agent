@@ -15,15 +15,28 @@ export type ArchiveApp = {
   close: () => Promise<void>;
 };
 
+/** UI breakage modes. `original` keeps the names the saved flow targets. */
+export type ArchiveVariant = "original" | "renamed" | "moved" | "modal";
+
+export type ArchiveAppOptions = {
+  /** Defaults to `original`. */
+  variant?: ArchiveVariant;
+};
+
 /**
  * Serves the archive fixture on 127.0.0.1.
  * Archived projects stay hidden until `close`.
+ * `options.variant` defaults to `original` so existing callers stay on the current UI.
  */
-export function start(port: number): Promise<ArchiveApp> {
+export function start(
+  port: number,
+  options: ArchiveAppOptions = {},
+): Promise<ArchiveApp> {
   assertPort(port);
+  const variant = resolveVariant(options.variant);
   const archived = new Set<string>();
   const server = createServer((request, response) => {
-    handle(request, response, archived).catch((error: unknown) => {
+    handle(request, response, archived, variant).catch((error: unknown) => {
       if (response.headersSent || response.writableEnded) {
         response.destroy();
         return;
@@ -77,6 +90,23 @@ function assertPort(port: number): void {
   }
 }
 
+function resolveVariant(variant: ArchiveVariant | undefined): ArchiveVariant {
+  if (variant === undefined) {
+    return "original";
+  }
+  if (
+    variant !== "original" &&
+    variant !== "renamed" &&
+    variant !== "moved" &&
+    variant !== "modal"
+  ) {
+    throw new Error(
+      `Archive fixture variant must be original, renamed, moved, or modal. Received ${String(variant)}.`,
+    );
+  }
+  return variant;
+}
+
 function boundUrl(server: Server): string {
   const address = server.address();
   if (address === null || typeof address === "string") {
@@ -107,6 +137,7 @@ async function handle(
   request: IncomingMessage,
   response: ServerResponse,
   archived: Set<string>,
+  variant: ArchiveVariant,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", `http://${LOOPBACK}`);
 
@@ -119,11 +150,19 @@ async function handle(
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(
       response,
-      renderPage(archived, {
-        menu: url.searchParams.get("menu") === ALPHA_ID,
-        confirm: url.searchParams.get("confirm") === ALPHA_ID,
-      }),
+      variant === "moved"
+        ? renderMovedHome()
+        : renderPage(archived, queryFrom(url), variant),
     );
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    variant === "moved" &&
+    url.pathname === "/projects"
+  ) {
+    sendHtml(response, renderPage(archived, queryFrom(url), variant));
     return;
   }
 
@@ -132,11 +171,27 @@ async function handle(
     if (id === ALPHA_ID) {
       archived.add(ALPHA_ID);
     }
-    redirect(response, "/");
+    redirect(response, listPath(variant));
     return;
   }
 
   sendText(response, 404, "Not found");
+}
+
+type PageQuery = {
+  menu: boolean;
+  confirm: boolean;
+};
+
+function queryFrom(url: URL): PageQuery {
+  return {
+    menu: url.searchParams.get("menu") === ALPHA_ID,
+    confirm: url.searchParams.get("confirm") === ALPHA_ID,
+  };
+}
+
+function listPath(variant: ArchiveVariant): string {
+  return variant === "moved" ? "/projects" : "/";
 }
 
 function readBody(request: IncomingMessage): Promise<string> {
@@ -177,15 +232,31 @@ function readBody(request: IncomingMessage): Promise<string> {
   });
 }
 
-type PageQuery = {
-  menu: boolean;
-  confirm: boolean;
-};
+function renderMovedHome(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Home</title>
+</head>
+<body>
+<header><p>Signed in as project owner</p></header>
+<main>
+<p><a href="/projects">Projects</a></p>
+</main>
+</body>
+</html>
+`;
+}
 
-function renderPage(archived: ReadonlySet<string>, query: PageQuery): string {
+function renderPage(
+  archived: ReadonlySet<string>,
+  query: PageQuery,
+  variant: ArchiveVariant,
+): string {
   const active = !archived.has(ALPHA_ID);
   const body = active
-    ? renderProject(query.menu, query.confirm)
+    ? renderProject(query.menu, query.confirm, variant)
     : "<p>No active projects.</p>";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -204,12 +275,17 @@ ${body}
 `;
 }
 
-function renderProject(menuOpen: boolean, confirmOpen: boolean): string {
-  const menu = menuOpen ? renderArchiveMenu() : "";
-  const confirm = confirmOpen ? renderConfirm() : "";
+function renderProject(
+  menuOpen: boolean,
+  confirmOpen: boolean,
+  variant: ArchiveVariant,
+): string {
+  const action = listPath(variant);
+  const menu = menuOpen ? renderArchiveMenu(variant, action) : "";
+  const confirm = confirmOpen ? renderConfirm(variant) : "";
   return `<section>
 <p>${escapeHtml(ALPHA_NAME)}</p>
-<form method="get" action="/">
+<form method="get" action="${action}">
 <input type="hidden" name="menu" value="${escapeHtml(ALPHA_ID)}">
 <button type="submit">Options for ${escapeHtml(ALPHA_NAME)}</button>
 </form>
@@ -218,21 +294,29 @@ ${confirm}
 </section>`;
 }
 
-function renderArchiveMenu(): string {
-  return `<form method="get" action="/">
+function renderArchiveMenu(variant: ArchiveVariant, action: string): string {
+  const name = variant === "renamed" ? "Move to archive" : "Archive";
+  return `<form method="get" action="${action}">
 <input type="hidden" name="confirm" value="${escapeHtml(ALPHA_ID)}">
 <div role="menu">
-<button type="submit" role="menuitem">Archive</button>
+<button type="submit" role="menuitem">${escapeHtml(name)}</button>
 </div>
 </form>`;
 }
 
-function renderConfirm(): string {
-  return `<form method="post" action="/archive">
+function renderConfirm(variant: ArchiveVariant): string {
+  const form = `<form method="post" action="/archive">
 <input type="hidden" name="id" value="${escapeHtml(ALPHA_ID)}">
-<p>Archive this project?</p>
+${variant === "modal" ? "" : "<p>Archive this project?</p>"}
 <button type="submit" data-testid="confirm-archive">Archive project</button>
 </form>`;
+  if (variant !== "modal") {
+    return form;
+  }
+  return `<dialog open aria-modal="true" aria-labelledby="archive-dialog-title">
+<h2 id="archive-dialog-title">Archive this project?</h2>
+${form}
+</dialog>`;
 }
 
 function escapeHtml(value: string): string {
