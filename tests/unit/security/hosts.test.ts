@@ -212,6 +212,7 @@ function projectConfig(application: {
       enabled: false,
       maxSteps: 30,
       recoveryEnabled: false,
+      debugTools: false,
     },
     playwright: {
       browser: "chromium",

@@ -41,6 +41,8 @@ export const stagehandSchema = z
     enabled: z.boolean(),
     maxSteps: z.number().int().positive(),
     recoveryEnabled: z.boolean(),
+    /** Optional in YAML. Omitted configs leave browser debug tools unregistered. */
+    debugTools: z.boolean().default(false),
   })
   .strict();
 

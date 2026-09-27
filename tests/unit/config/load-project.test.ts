@@ -82,6 +82,7 @@ test("the section 7 sample parses once project.id is added", () => {
       enabled: true,
       maxSteps: 30,
       recoveryEnabled: true,
+      debugTools: false,
     },
     playwright: {
       browser: "chromium",
@@ -166,6 +167,7 @@ evidence:
   expect(config.playwright.browser).toBe("chromium");
   expect(config.playwright.headless).toBe(true);
   expect(config.stagehand.maxSteps).toBe(30);
+  expect(config.stagehand.debugTools).toBe(false);
   expect(config.evidence.maxResponseBodyBytes).toBe(262144);
   expect(config.security).toEqual({
     destructiveActionsAllowed: false,
