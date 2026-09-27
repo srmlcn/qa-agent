@@ -1,5 +1,7 @@
 const DEFAULT_PRODUCTION_ALLOWED = false;
 const DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED = false;
+/** Ten minutes. Used when `security.maxRunDurationMs` is omitted. */
+const DEFAULT_MAX_RUN_DURATION_MS = 600_000;
 const DEFAULT_PLAYWRIGHT_BROWSER = "chromium";
 const DEFAULT_PLAYWRIGHT_HEADLESS = true;
 const DEFAULT_STAGEHAND_MAX_STEPS = 30;
@@ -10,6 +12,7 @@ const DEFAULT_WORKER_PROFILES: readonly string[] = [];
 export {
   DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED,
   DEFAULT_MAX_RESPONSE_BODY_BYTES,
+  DEFAULT_MAX_RUN_DURATION_MS,
   DEFAULT_PLAYWRIGHT_BROWSER,
   DEFAULT_PLAYWRIGHT_HEADLESS,
   DEFAULT_PRODUCTION_ALLOWED,
@@ -37,6 +40,7 @@ const EVIDENCE_DEFAULTS: Readonly<Record<string, unknown>> = {
 
 const SECURITY_DEFAULTS: Readonly<Record<string, unknown>> = {
   destructiveActionsAllowed: DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED,
+  maxRunDurationMs: DEFAULT_MAX_RUN_DURATION_MS,
   redactHeaders: DEFAULT_REDACT_HEADERS,
 };
 
