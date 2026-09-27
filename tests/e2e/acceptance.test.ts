@@ -38,6 +38,9 @@ import { createFakeClient, type FakeScript } from "../../src/stagehand/fake-clie
 import type { LlmProvider } from "../../src/stagehand/provider.js";
 
 const TEST_TIMEOUT_MS = 180_000;
+/** A stuck browser or fixture close fails the numbered step before the test budget. */
+const STEP_BUDGET_MS = 120_000;
+const CLOSE_BUDGET_MS = 10_000;
 const FLOW_ID_PATTERN = /^[a-z0-9]+(\.[a-z0-9-]+)*$/;
 const FLOW_ID = "project.archive";
 const FLOW_NAME = "Archive an active project";
@@ -257,8 +260,8 @@ test(
         assertTextClean("captured logs", capturedLogs.join("\n"));
       });
     } finally {
-      await archive?.close();
-      await authApp?.close();
+      await closeApp(archive);
+      await closeApp(authApp);
       if (previousCwd.length > 0) {
         process.chdir(previousCwd);
       }
@@ -273,8 +276,10 @@ test(
 );
 
 async function runStep(stepNumber: number, action: () => Promise<void>): Promise<void> {
+  process.stderr.write(`step ${stepNumber} started\n`);
   try {
-    await action();
+    await withBudget(action(), STEP_BUDGET_MS, `timed out after ${STEP_BUDGET_MS}ms`);
+    process.stderr.write(`step ${stepNumber} passed\n`);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`step ${stepNumber} failed: ${detail}`, { cause: error });
@@ -332,7 +337,7 @@ async function replaceArchive(
   expectedUrl: string,
   variant: ArchiveVariant,
 ): Promise<ArchiveApp> {
-  await current?.close();
+  await closeApp(current);
   const next = await listenArchive(port, variant);
   if (next.url !== expectedUrl) {
     await next.close();
@@ -514,6 +519,37 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function closeApp(app: { close: () => Promise<void> } | undefined): Promise<void> {
+  if (app === undefined) {
+    return;
+  }
+  await withBudget(app.close(), CLOSE_BUDGET_MS, `close timed out after ${CLOSE_BUDGET_MS}ms`);
+}
+
+async function withBudget<T>(
+  work: Promise<T>,
+  budgetMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // A budget winner leaves `work` running. Observe a later rejection here.
+  void work.catch(() => undefined);
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(message));
+        }, budgetMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function restoreEnv(name: string, value: string | undefined): void {
