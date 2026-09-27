@@ -24,7 +24,14 @@ const DEBUG_TOOL_NAMES = [
   "browser.trace",
 ];
 
-const BASE_TOOL_NAMES = ["qa.get_run", "qa.list_flows", "qa.ping", "qa.status"];
+const BASE_TOOL_NAMES = [
+  "qa.execute_flow",
+  "qa.execute_suite",
+  "qa.get_run",
+  "qa.list_flows",
+  "qa.ping",
+  "qa.status",
+];
 
 const NO_PAGE = {
   code: "FLOW_VALIDATION_FAILED",
