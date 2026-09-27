@@ -52,6 +52,7 @@ test("a valid project returns configOk true", async () => {
   const root = createProject();
   writeProjectConfig(root);
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
+  stubInstalledChromium();
 
   const health = collectHealth(root);
   expect(health).toEqual({
@@ -90,6 +91,7 @@ test("an unset API key is a problem and doctor still exits 0", async () => {
   const root = createProject();
   writeProjectConfig(root);
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
+  stubInstalledChromium();
   const withKey = await runDoctor(root);
   expect(withKey.stdout).not.toContain(FIXTURE_API_KEY);
   delete process.env[API_KEY_ENV];
@@ -197,6 +199,11 @@ test("doctor is the autoloaded command name", () => {
   expect(command.name).toBe("doctor");
   expect(command.summary).toBe("report installation health");
 });
+
+/** CI does not install Chromium. These checks are not about browser setup. */
+function stubInstalledChromium(): void {
+  vi.spyOn(chromium, "executablePath").mockReturnValue(process.execPath);
+}
 
 async function runDoctor(root: string): Promise<{ code: number; stdout: string }> {
   const previous = process.cwd();
