@@ -26,6 +26,8 @@ const DEBUG_TOOL_NAMES = [
 
 const BASE_TOOL_NAMES = [
   "qa.discover_flow",
+  "qa.execute_flow",
+  "qa.execute_suite",
   "qa.get_run",
   "qa.list_flows",
   "qa.ping",
