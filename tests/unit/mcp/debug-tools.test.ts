@@ -24,6 +24,8 @@ const DEBUG_TOOL_NAMES = [
   "browser.trace",
 ];
 
+const BASE_TOOL_NAMES = ["qa.get_run", "qa.list_flows", "qa.ping", "qa.status"];
+
 const NO_PAGE = {
   code: "FLOW_VALIDATION_FAILED",
   message: "no active page",
@@ -55,19 +57,22 @@ test("tools/list omits browser debug tools unless stagehand.debugTools is true",
   const missingRoot = mkdtempSync(join(tmpdir(), "qa-debug-missing-"));
   roots.push(missingRoot);
   const missing = await listedNames(missingRoot);
-  expect(missing).toEqual(["qa.ping"]);
+  expect(missing).toEqual(BASE_TOOL_NAMES);
   expect(missing).not.toContain("browser.screenshot");
 
   const omittedRoot = writeProject(undefined);
   expect(loadProjectConfig(omittedRoot).stagehand.debugTools).toBe(false);
-  expect(await listedNames(omittedRoot)).toEqual(["qa.ping"]);
+  expect(await listedNames(omittedRoot)).toEqual(BASE_TOOL_NAMES);
 
   const disabledRoot = writeProject(false);
   expect(await listedNames(disabledRoot)).not.toContain("browser.screenshot");
 
   const enabled = writeProject(true);
   expect(loadProjectConfig(enabled).stagehand.debugTools).toBe(true);
-  expect(await listedNames(enabled)).toEqual([...DEBUG_TOOL_NAMES, "qa.ping"]);
+  expect(await listedNames(enabled)).toEqual([
+    ...DEBUG_TOOL_NAMES,
+    ...BASE_TOOL_NAMES,
+  ]);
 });
 
 test("debug tool schemas and handlers do not accept a command or a path", async () => {

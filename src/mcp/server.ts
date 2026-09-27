@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { loadProjectConfig } from "../config/load-project.js";
 import { QA_ERROR_CODES } from "../errors/codes.js";
+import { QaError } from "../errors/qa-error.js";
 import { version } from "../index.js";
 import { createLogger } from "../runtime/logger.js";
 import { loadTools, type McpTool } from "./load-tools.js";
@@ -47,8 +48,19 @@ function registerLoadedTool(server: McpServer, tool: McpTool): void {
       inputSchema: tool.schema,
     },
     async (args) => {
-      const result = await tool.handler(args);
-      return toToolResult(result);
+      try {
+        const result = await tool.handler(args);
+        return toToolResult(result);
+      } catch (error) {
+        if (error instanceof QaError) {
+          const failure: CallToolResult = {
+            isError: true,
+            content: [{ type: "text", text: JSON.stringify(error.toJSON()) }],
+          };
+          return failure;
+        }
+        throw error;
+      }
     },
   );
 }
@@ -70,6 +82,10 @@ function waitForStdinClose(): Promise<void> {
   });
 }
 
+/**
+ * Loads tools and returns a server that is not yet connected to a transport.
+ * Browser debug tools are included only when `stagehand.debugTools` is true.
+ */
 export async function createMcpServer(
   projectRoot: string = process.cwd(),
 ): Promise<McpServer> {
