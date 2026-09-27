@@ -50,7 +50,13 @@ afterAll(async () => {
 test("tools/list includes the read tools", async () => {
   const listed = await client.listTools();
   const names = listed.tools.map((tool) => tool.name).sort();
-  expect(names).toEqual(["qa.get_run", "qa.list_flows", "qa.ping", "qa.status"]);
+  expect(names).toEqual([
+    "qa.discover_flow",
+    "qa.get_run",
+    "qa.list_flows",
+    "qa.ping",
+    "qa.status",
+  ]);
 });
 
 test("qa.list_flows returns one metadata object and no steps", async () => {
