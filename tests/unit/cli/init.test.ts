@@ -62,6 +62,7 @@ test("first run creates config and flows directory", async () => {
       enabled: true,
       maxSteps: 30,
       recoveryEnabled: true,
+      debugTools: false,
     },
     playwright: {
       browser: "chromium",
