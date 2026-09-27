@@ -231,12 +231,15 @@ test(
       const listed = await readFrame();
       expect(listed.id).toBe(2);
       expect(toolNames(listed.result).sort()).toEqual([
+        "qa.cancel_run",
+        "qa.capture_auth",
         "qa.discover_flow",
         "qa.execute_flow",
         "qa.execute_suite",
         "qa.get_run",
         "qa.list_flows",
         "qa.ping",
+        "qa.repair_flow",
         "qa.second",
         "qa.status",
       ]);
