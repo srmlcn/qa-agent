@@ -1,8 +1,28 @@
 import type { Page } from "playwright";
 import { QaError } from "../errors/qa-error.js";
-import type { Step } from "../flows/schema.js";
+import type { Locator as FlowLocator, Step } from "../flows/schema.js";
 import { classifyPlaywrightError } from "./errors.js";
 import { toLocator } from "./locators.js";
+
+/**
+ * Zod's inferred Step union drops every field except `action`.
+ * These are the fields the action still has at runtime.
+ */
+type RunnableStep =
+  | { id: string; action: "goto"; value: string }
+  | { id: string; action: "reload" }
+  | { id: string; action: "click"; locator: FlowLocator }
+  | { id: string; action: "fill"; locator: FlowLocator; value: string }
+  | { id: string; action: "press"; locator: FlowLocator; value: string }
+  | { id: string; action: "select"; locator: FlowLocator; value: string }
+  | { id: string; action: "check"; locator: FlowLocator }
+  | { id: string; action: "uncheck"; locator: FlowLocator }
+  | {
+      id: string;
+      action: "waitFor";
+      locator?: FlowLocator;
+      value?: string;
+    };
 
 /** A timed wait longer than this is refused and never started. */
 const MAX_WAIT_MS = 10_000;
@@ -17,19 +37,24 @@ export async function runAction(
   step: Step,
   timeoutMs: number,
 ): Promise<void> {
+  const runnable = runnableStep(step);
   try {
-    await performAction(page, step, timeoutMs);
+    await performAction(page, runnable, timeoutMs);
   } catch (error) {
     if (error instanceof QaError || isAssertionFailure(error)) {
       throw error;
     }
-    throw classifyPlaywrightError(error, { stepId: step.id });
+    throw classifyPlaywrightError(error, { stepId: runnable.id });
   }
+}
+
+function runnableStep(step: Step): RunnableStep {
+  return step as RunnableStep;
 }
 
 async function performAction(
   page: Page,
-  step: Step,
+  step: RunnableStep,
   timeoutMs: number,
 ): Promise<void> {
   switch (step.action) {
@@ -76,7 +101,7 @@ async function performAction(
 
 async function waitForStep(
   page: Page,
-  step: Extract<Step, { action: "waitFor" }>,
+  step: Extract<RunnableStep, { action: "waitFor" }>,
   timeoutMs: number,
 ): Promise<void> {
   if (step.locator !== undefined) {

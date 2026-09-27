@@ -79,6 +79,7 @@ test("first run creates config and flows directory", async () => {
     security: {
       redactHeaders: ["authorization", "cookie", "set-cookie"],
       destructiveActionsAllowed: false,
+      maxRunDurationMs: 600000,
     },
     auth: {
       workerProfiles: [],
