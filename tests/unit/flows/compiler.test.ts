@@ -318,6 +318,32 @@ test("builds a short intent from the method and target", () => {
   });
 });
 
+test("emits role when the action carries both role and xpath", () => {
+  const flow = compile(
+    trajectory([
+      {
+        method: "click",
+        action: "click the project options menu",
+        instruction: "Open the options menu for the project",
+        selector: "xpath=//button[@id='options']",
+        arguments: { role: "button", name: "Options for Atlas" },
+      },
+    ]),
+    options,
+  );
+
+  expect(flow.state).toBe("draft");
+  expect(flow.assertions).toEqual([]);
+  expect(flow.steps).toHaveLength(1);
+  expect(flow.steps[0]).toMatchObject({
+    id: "click-the-project-options-menu",
+    intent: "click the project options menu",
+    semanticFallback: "Open the options menu for the project",
+    action: "click",
+    locator: { type: "role", role: "button", name: "Options for Atlas" },
+  });
+});
+
 test("keeps xpath only when role and css are absent", () => {
   const flow = compile(
     trajectory([

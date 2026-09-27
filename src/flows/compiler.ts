@@ -3,6 +3,7 @@ import type {
   DiscoveryAction,
   DiscoveryTrajectory,
 } from "../stagehand/trajectory.js";
+import { chooseLocator } from "./rank.js";
 import type { FlowSpec, Locator, Step } from "./schema.js";
 
 export type CompileOptions = {
@@ -29,11 +30,6 @@ type StepIdentity = {
   semanticFallback: string;
 };
 
-type RoleParts = {
-  role?: string;
-  name?: string;
-};
-
 const METHOD_TO_ACTION: Readonly<Record<string, FlowAction>> = {
   click: "click",
   fill: "fill",
@@ -49,15 +45,9 @@ const METHOD_TO_ACTION: Readonly<Record<string, FlowAction>> = {
 
 const VALUE_KEYS = ["value", "text", "url", "keys", "key"] as const;
 
-const ROLE_SELECTOR =
-  /^(?:internal:)?role=([A-Za-z][\w-]*)(?:\[name=(?:"([^"]*)"|'([^']*)')[a-z]*\])?$/;
-
-const UNSUPPORTED_ENGINE =
-  /^(?:text|id|nth|visible|data-testid|testid)=|^internal:/i;
-
 /**
  * Turns a discovery trajectory into a draft FlowSpec.
- * Locator ranking and Playwright validation are separate leaves.
+ * Playwright validation is a separate leaf.
  */
 export function compile(
   trajectory: DiscoveryTrajectory,
@@ -101,7 +91,7 @@ function compileAction(
   usedIds: Set<string>,
 ): Step {
   const flowAction = resolveMethod(action, flowId);
-  const locator = initialLocator(action);
+  const locator = chooseLocator(action);
   const value = actionValue(action, flowAction);
   const intent =
     trajectoryDescription(action) ??
@@ -302,158 +292,6 @@ function targetLabel(
   return "";
 }
 
-/**
- * Private locator choice for one action.
- * The ranking leaf replaces this call with chooseLocator.
- */
-function initialLocator(action: DiscoveryAction): Locator | undefined {
-  const role = roleLocator(action);
-  if (role !== undefined) {
-    return role;
-  }
-
-  const css = cssSelector(action);
-  if (css !== undefined) {
-    return { type: "css", selector: css };
-  }
-
-  const xpath = xpathSelector(action);
-  if (xpath !== undefined) {
-    return { type: "xpath", selector: xpath };
-  }
-
-  return undefined;
-}
-
-function roleLocator(action: DiscoveryAction): Locator | undefined {
-  let role = hintString(action, "role");
-  let name =
-    hintString(action, "name") ?? hintString(action, "accessibleName");
-
-  for (const selector of selectorStrings(action)) {
-    const parsed = parseRoleSelector(selector);
-    if (parsed === undefined) {
-      continue;
-    }
-    role = role ?? parsed.role;
-    name = name ?? parsed.name;
-  }
-
-  if (role === undefined || name === undefined) {
-    return undefined;
-  }
-
-  return { type: "role", role, name };
-}
-
-function cssSelector(action: DiscoveryAction): string | undefined {
-  const explicit = hintString(action, "css");
-  if (explicit !== undefined) {
-    const stripped = stripEngine(explicit, "css");
-    if (stripped.length > 0) {
-      return stripped;
-    }
-  }
-
-  for (const selector of selectorStrings(action)) {
-    const css = cssFromSelector(selector);
-    if (css !== undefined) {
-      return css;
-    }
-  }
-
-  return undefined;
-}
-
-function xpathSelector(action: DiscoveryAction): string | undefined {
-  const explicit = hintString(action, "xpath");
-  if (explicit !== undefined) {
-    const stripped = stripEngine(explicit, "xpath");
-    if (stripped.length > 0) {
-      return stripped;
-    }
-  }
-
-  for (const selector of selectorStrings(action)) {
-    if (!isXPath(selector)) {
-      continue;
-    }
-    const stripped = stripEngine(selector, "xpath");
-    if (stripped.length > 0) {
-      return stripped;
-    }
-  }
-
-  return undefined;
-}
-
-function selectorStrings(action: DiscoveryAction): string[] {
-  const selectors: string[] = [];
-  const direct = nonEmptyString(action.selector);
-  if (direct !== undefined) {
-    selectors.push(direct);
-  }
-  const nested = stringProperty(action.arguments, "selector");
-  if (nested !== undefined && !selectors.includes(nested)) {
-    selectors.push(nested);
-  }
-  return selectors;
-}
-
-function hintString(action: DiscoveryAction, key: string): string | undefined {
-  return stringProperty(action, key) ?? stringProperty(action.arguments, key);
-}
-
-function parseRoleSelector(selector: string): RoleParts | undefined {
-  const match = ROLE_SELECTOR.exec(selector.trim());
-  if (match === null) {
-    return undefined;
-  }
-  const role = match[1];
-  if (role === undefined) {
-    return undefined;
-  }
-  const name = nonEmptyString(match[2] ?? match[3]);
-  if (name === undefined) {
-    return { role };
-  }
-  return { role, name };
-}
-
-function cssFromSelector(selector: string): string | undefined {
-  const trimmed = selector.trim();
-  if (
-    trimmed.length === 0 ||
-    isXPath(trimmed) ||
-    parseRoleSelector(trimmed) !== undefined ||
-    UNSUPPORTED_ENGINE.test(trimmed)
-  ) {
-    return undefined;
-  }
-  const stripped = stripEngine(trimmed, "css");
-  return stripped.length > 0 ? stripped : undefined;
-}
-
-function isXPath(selector: string): boolean {
-  const trimmed = selector.trim();
-  return (
-    trimmed.toLowerCase().startsWith("xpath=") ||
-    trimmed.startsWith("/") ||
-    trimmed.startsWith("(") ||
-    trimmed.startsWith("./") ||
-    trimmed.startsWith("../")
-  );
-}
-
-function stripEngine(selector: string, engine: string): string {
-  const trimmed = selector.trim();
-  const prefix = `${engine}=`;
-  if (trimmed.toLowerCase().startsWith(prefix)) {
-    return trimmed.slice(prefix.length).trim();
-  }
-  return trimmed;
-}
-
 function actionValue(
   action: DiscoveryAction,
   flowAction: FlowAction,
@@ -510,13 +348,6 @@ function stepId(intent: string, ordinal: number, used: Set<string>): string {
   }
   used.add(id);
   return id;
-}
-
-function stringProperty(value: unknown, key: string): string | undefined {
-  if (!isPlainRecord(value) || !Object.hasOwn(value, key)) {
-    return undefined;
-  }
-  return nonEmptyString(value[key]);
 }
 
 function scalarString(value: unknown): string | undefined {
