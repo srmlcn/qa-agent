@@ -63,7 +63,8 @@ export async function scriptedLogin(
 
   const username = requiredEnv(options.usernameEnv);
   const password = requiredEnv(options.passwordEnv);
-  const timeoutMs = options.config?.playwright.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+  const timeoutMs =
+    options.config?.playwright.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
 
   const session = await startBrowser({
     headless: true,
@@ -100,13 +101,20 @@ export async function scriptedLogin(
   }
 }
 
+type LoginAction = "goto" | "fill" | "click";
+
+type StepIdentity = {
+  id: string;
+  intent: string;
+  semanticFallback: string;
+};
+
 function gotoStep(url: string): Step {
-  return {
-    id: "open-login",
-    intent: "Open the login page",
+  return seal({
+    ...loginIdentity("open-login", "Open the login page"),
     action: "goto",
     value: url,
-  };
+  });
 }
 
 function fillStep(
@@ -115,22 +123,37 @@ function fillStep(
   locator: Locator,
   value: string,
 ): Step {
-  return {
-    id,
-    intent,
+  return seal({
+    ...loginIdentity(id, intent),
     action: "fill",
     locator,
     value,
-  };
+  });
 }
 
 function clickStep(locator: Locator): Step {
-  return {
-    id: "submit-login",
-    intent: "Submit the login form",
+  return seal({
+    ...loginIdentity("submit-login", "Submit the login form"),
     action: "click",
     locator,
+  });
+}
+
+function loginIdentity(id: string, intent: string): StepIdentity {
+  return {
+    id,
+    intent,
+    semanticFallback: intent,
   };
+}
+
+/**
+ * Zod's inferred Step union drops fields other than `action`.
+ * Sealing through an annotated parameter keeps those fields and still
+ * returns the schema's Step type.
+ */
+function seal<T extends StepIdentity & { action: LoginAction }>(step: T): Step {
+  return step;
 }
 
 /**
