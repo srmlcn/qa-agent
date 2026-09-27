@@ -1,17 +1,18 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { QaError } from "../errors/qa-error.js";
-import { parseFlowSpec, type FlowSpec } from "./schema.js";
+import { flowSpecSchema, parseFlowSpec, type FlowSpec } from "./schema.js";
 
 export type FlowFormat = "yaml" | "json";
 
 /**
  * Parse YAML or JSON text into a FlowSpec.
- * Schema aliases are normalized by {@link parseFlowSpec}.
+ * Schema aliases are normalized by the Zod schema.
+ * Unknown keys are stripped so they cannot be persisted on a flow.
  */
 export function parseFlow(text: string, format: FlowFormat): FlowSpec {
   const raw = decodeFlow(text, format);
   try {
-    return parseFlowSpec(raw);
+    return flowSpecSchema.strip().parse(raw);
   } catch (error) {
     throw flowValidationFailed(error);
   }
