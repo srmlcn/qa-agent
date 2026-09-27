@@ -29,6 +29,8 @@ export interface NetworkFailure {
    * Header values must already be redacted before insertion.
    */
   headers: Record<string, string>;
+  /** True when a response body was not stored. */
+  bodyOmitted?: boolean;
 }
 
 export interface NetworkRecord {
@@ -42,6 +44,8 @@ export interface NetworkRecord {
    * Header values must already be redacted before insertion.
    */
   headers: Record<string, string>;
+  /** True when a response body was not stored. */
+  bodyOmitted?: boolean;
 }
 
 export interface ConsoleRecord {
