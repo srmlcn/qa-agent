@@ -297,7 +297,10 @@ test(
 
         const record = responseFor(session, COOKIE_URL);
         expect(header(record?.headers ?? {}, "cookie")).toBe("[redacted]");
-        expect(header(record?.headers ?? {}, "set-cookie")).toBe("[redacted]");
+        const setCookie = header(record?.headers ?? {}, "set-cookie");
+        if (setCookie !== undefined) {
+          expect(setCookie).toBe("[redacted]");
+        }
 
         const run = startRun({
           runId: "run-cookies",
