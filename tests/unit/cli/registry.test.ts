@@ -9,14 +9,16 @@ test("discovers help from the real commands directory", async () => {
   const commands = await loadCommands(commandsDirectory());
 
   expect(commands.map((command) => command.name)).toEqual([
+    "auth",
     "doctor",
     "help",
     "init",
     "mcp",
   ]);
-  expect(commands[0]?.summary).toBe("report installation health");
-  expect(commands[1]?.summary).toBe("list available commands");
-  expect(commands[3]?.summary).toBe("serve MCP tools over stdio");
+  expect(commands[0]?.summary).toBe("manage auth profiles");
+  expect(commands[1]?.summary).toBe("report installation health");
+  expect(commands[2]?.summary).toBe("list available commands");
+  expect(commands[4]?.summary).toBe("serve MCP tools over stdio");
 });
 
 test("unknown command path exits 1", async () => {
