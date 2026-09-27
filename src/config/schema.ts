@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_MAX_RUN_DURATION_MS } from "./defaults.js";
 
 /** Spec prose: project ids used in home-directory paths. */
 export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -66,6 +67,12 @@ export const securitySchema = z
   .object({
     redactHeaders: z.array(z.string().min(1)),
     destructiveActionsAllowed: z.boolean(),
+    /** Optional in YAML. Omitted configs receive 10 minutes. */
+    maxRunDurationMs: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_MAX_RUN_DURATION_MS),
   })
   .strict();
 

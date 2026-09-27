@@ -99,6 +99,7 @@ test("the section 7 sample parses once project.id is added", () => {
     security: {
       redactHeaders: ["authorization", "cookie", "set-cookie"],
       destructiveActionsAllowed: false,
+      maxRunDurationMs: 600000,
     },
     auth: {
       workerProfiles: [],
@@ -168,6 +169,7 @@ evidence:
   expect(config.evidence.maxResponseBodyBytes).toBe(262144);
   expect(config.security).toEqual({
     destructiveActionsAllowed: false,
+    maxRunDurationMs: 600000,
     redactHeaders: ["authorization", "cookie", "set-cookie"],
   });
   expect(config.auth.workerProfiles).toEqual([]);
