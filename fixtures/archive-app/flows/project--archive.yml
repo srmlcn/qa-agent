@@ -1,0 +1,51 @@
+version: 1
+
+id: project.archive
+name: Archive an active project
+
+objective: >
+  A signed-in project owner archives Alpha and the project
+  stays gone from the active list.
+
+inputs: {}
+
+steps:
+  - id: open-project-options
+    intent: Open the options menu for Alpha.
+    action: click
+    locator:
+      type: role
+      role: button
+      name: Options for Alpha
+
+  - id: select-archive
+    intent: Choose the archive operation.
+    action: click
+    locator:
+      type: role
+      role: menuitem
+      name: Archive
+
+  - id: confirm-archive
+    intent: Confirm that the project should be archived.
+    action: click
+    locator:
+      type: role
+      role: button
+      name: Archive project
+
+assertions:
+  - id: project-not-active
+    type: not-visible
+    locator:
+      type: text
+      text: Alpha
+
+  - id: persists-after-reload
+    type: custom-sequence
+    sequence:
+      - action: reload
+      - assert: not-visible
+        locator:
+          type: text
+          text: Alpha
