@@ -200,6 +200,7 @@ test("init appears in help via autoload", async () => {
   try {
     const commands = await loadCommands();
     expect(commands.map((item) => item.name)).toEqual([
+      "auth",
       "doctor",
       "help",
       "init",
