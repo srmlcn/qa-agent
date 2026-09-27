@@ -231,6 +231,7 @@ test(
       const listed = await readFrame();
       expect(listed.id).toBe(2);
       expect(toolNames(listed.result).sort()).toEqual([
+        "qa.discover_flow",
         "qa.execute_flow",
         "qa.execute_suite",
         "qa.get_run",

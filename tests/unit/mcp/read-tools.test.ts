@@ -51,6 +51,7 @@ test("tools/list includes the read tools", async () => {
   const listed = await client.listTools();
   const names = listed.tools.map((tool) => tool.name).sort();
   expect(names).toEqual([
+    "qa.discover_flow",
     "qa.execute_flow",
     "qa.execute_suite",
     "qa.get_run",
