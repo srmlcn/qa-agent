@@ -121,34 +121,48 @@ test("qa.get_run reports an unknown run as QaError JSON", async () => {
 test("qa.status does not include a fixture API key from the environment", async () => {
   const projectRoot = createProjectRoot();
   writeProjectConfig(projectRoot);
+  const previousHome = process.env.AUTONOMOUS_QA_HOME;
+  const home = mkdtempSync(join(tmpdir(), "qa-status-home-"));
+  process.env.AUTONOMOUS_QA_HOME = home;
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
 
-  const ready = await callJson("qa.status", { projectRoot });
-  expect(ready).toMatchObject({
-    packageVersion: version,
-    nodeOk: true,
-    configOk: true,
-    llmOk: true,
-  });
-  expect(typeof ready).toBe("object");
-  if (!isRecord(ready)) {
-    return;
-  }
-  expect(typeof ready.browserOk).toBe("boolean");
-  expect(JSON.stringify(ready)).not.toContain(FIXTURE_API_KEY);
-  expect(ready.problems).toEqual(ready.browserOk ? [] : ["Chromium is not installed"]);
+  try {
+    const ready = await callJson("qa.status", { projectRoot });
+    expect(ready).toMatchObject({
+      packageVersion: version,
+      nodeOk: true,
+      configOk: true,
+      llmOk: true,
+      homeOk: true,
+    });
+    expect(typeof ready).toBe("object");
+    if (!isRecord(ready)) {
+      return;
+    }
+    expect(typeof ready.browserOk).toBe("boolean");
+    expect(JSON.stringify(ready)).not.toContain(FIXTURE_API_KEY);
+    expect(ready.problems).toEqual(ready.browserOk ? [] : ["Chromium is not installed"]);
 
-  delete process.env[API_KEY_ENV];
-  const missingKey = await callJson("qa.status", { projectRoot });
-  expect(missingKey).toMatchObject({
-    configOk: true,
-    llmOk: false,
-  });
-  expect(JSON.stringify(missingKey)).not.toContain(FIXTURE_API_KEY);
-  if (isRecord(missingKey) && Array.isArray(missingKey.problems)) {
-    expect(missingKey.problems).toContain(
-      `LLM API key environment variable ${API_KEY_ENV} is unset`,
-    );
+    delete process.env[API_KEY_ENV];
+    const missingKey = await callJson("qa.status", { projectRoot });
+    expect(missingKey).toMatchObject({
+      configOk: true,
+      llmOk: false,
+      homeOk: true,
+    });
+    expect(JSON.stringify(missingKey)).not.toContain(FIXTURE_API_KEY);
+    if (isRecord(missingKey) && Array.isArray(missingKey.problems)) {
+      expect(missingKey.problems).toContain(
+        `LLM API key environment variable ${API_KEY_ENV} is unset`,
+      );
+    }
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.AUTONOMOUS_QA_HOME;
+    } else {
+      process.env.AUTONOMOUS_QA_HOME = previousHome;
+    }
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

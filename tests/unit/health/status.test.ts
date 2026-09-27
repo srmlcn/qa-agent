@@ -7,6 +7,7 @@ import { command } from "../../../src/cli/commands/doctor.js";
 import { projectConfigPath } from "../../../src/config/load-project.js";
 import { collectHealth } from "../../../src/health/status.js";
 import { version } from "../../../src/index.js";
+import { reportStatus } from "../../../src/mcp/tools/status.js";
 
 const FIXTURE_API_KEY = "doctor-fixture-key-do-not-print";
 const API_KEY_ENV = "QA_DOCTOR_FIXTURE_KEY";
@@ -63,6 +64,7 @@ test("a valid project returns configOk true", async () => {
     problems: [],
   });
   expect(JSON.stringify(health)).not.toContain(FIXTURE_API_KEY);
+  expect(reportStatus(root)).toEqual(health);
 
   const printed = await runDoctor(root);
   expect(printed.code).toBe(0);
