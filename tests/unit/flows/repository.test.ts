@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,6 +90,27 @@ test("dotted and hyphenated flow ids round-trip in distinct files", () => {
     "a.b--c",
     "a.b.c",
   ]);
+});
+
+test("a legacy hyphenated filename is listed, read, and rewritten on save", () => {
+  const flow = sampleFlow({ id: "a.b-c", name: "Legacy hyphen" });
+  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  mkdirSync(flowsDir, { recursive: true });
+  const legacyPath = join(flowsDir, "a--b-c.yml");
+  writeFileSync(legacyPath, stringifyFlow(flow, "yaml"));
+
+  expect(read(projectRoot, flow.id)).toEqual(flow);
+  expect(list(projectRoot).map((item) => item.id)).toEqual(["a.b-c"]);
+
+  const updated = sampleFlow({ id: "a.b-c", name: "Rewritten hyphen" });
+  save(projectRoot, updated);
+
+  expect(existsSync(legacyPath)).toBe(false);
+  expect(readdirSync(flowsDir)).toEqual(["a--b_c.yml"]);
+  expect(read(projectRoot, flow.id)).toEqual(updated);
+  expect(readFileSync(join(flowsDir, "a--b_c.yml"), "utf8")).toBe(
+    stringifyFlow(updated, "yaml"),
+  );
 });
 
 test("list payloads have no steps key", () => {

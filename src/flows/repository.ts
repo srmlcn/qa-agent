@@ -38,7 +38,7 @@ export function list(projectRoot: string): FlowSummary[] {
   }
   assertRealFlowsDirectory(projectRoot, directory);
 
-  const summaries: FlowSummary[] = [];
+  const summaries = new Map<string, { summary: FlowSummary; legacy: boolean }>();
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".yml")) {
       continue;
@@ -48,13 +48,19 @@ export function list(projectRoot: string): FlowSummary[] {
       continue;
     }
     const flow = parseFlow(readFileSync(filePath, "utf8"), "yaml");
-    if (encodedFileName(flow.id) !== entry.name) {
+    const legacy = isLegacyFlowFile(flow.id, entry.name);
+    if (encodedFileName(flow.id) !== entry.name && !legacy) {
       continue;
     }
-    summaries.push(toSummary(flow));
+    const current = summaries.get(flow.id);
+    if (current !== undefined && !current.legacy) {
+      continue;
+    }
+    summaries.set(flow.id, { summary: toSummary(flow), legacy });
   }
-  summaries.sort((left, right) => left.id.localeCompare(right.id));
-  return summaries;
+  return [...summaries.values()]
+    .map((entry) => entry.summary)
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 /**
@@ -64,7 +70,7 @@ export function list(projectRoot: string): FlowSummary[] {
 export function read(projectRoot: string, id: string): FlowSpec {
   assertFlowId(id);
   const filePath = flowFilePath(projectRoot, id);
-  const flow = parseFlow(readFlowText(filePath, id), "yaml");
+  const flow = parseFlow(readSavedFlowText(projectRoot, id, filePath), "yaml");
   if (flow.id !== id) {
     throw flowValidationFailed(`Flow id mismatch: ${id}`, id);
   }
@@ -83,6 +89,7 @@ export function save(projectRoot: string, flow: FlowSpec): void {
     throw flowValidationFailed(`Invalid flow id: ${flow.id}`, flow.id);
   }
   writeAtomically(directory, filePath, yaml);
+  removeReplacedLegacyFile(projectRoot, flow.id, filePath);
 }
 
 function toSummary(flow: FlowSpec): FlowSummary {
@@ -98,8 +105,19 @@ function toSummary(flow: FlowSpec): FlowSummary {
 }
 
 function flowFilePath(projectRoot: string, id: string): string {
+  return containedFlowFile(projectRoot, id, encodedFileName(id));
+}
+
+function legacyFlowFilePath(projectRoot: string, id: string): string {
+  return containedFlowFile(projectRoot, id, legacyFileName(id));
+}
+
+function containedFlowFile(
+  projectRoot: string,
+  id: string,
+  filename: string,
+): string {
   const directory = resolveFlowsDirectory(projectRoot);
-  const filename = encodedFileName(id);
   const filePath = join(directory, filename);
   if (
     basename(filePath) !== filename ||
@@ -117,11 +135,25 @@ function encodedFileName(id: string): string {
   // `project.archive` is stored as `project--archive.yml`.
   // Escape `-` to `_` before dots become `--`. `_` is outside the flow-id
   // alphabet, so `a.b.c` and `a.b--c` cannot share `a--b--c.yml`.
-  const filename = `${id.replaceAll("-", "_").replaceAll(".", "--")}.yml`;
+  return singleSegmentFileName(id, id.replaceAll("-", "_").replaceAll(".", "--"));
+}
+
+function legacyFileName(id: string): string {
+  assertFlowId(id);
+  // Releases before hyphen escaping stored `a.b-c` as `a--b-c.yml`.
+  return singleSegmentFileName(id, id.replaceAll(".", "--"));
+}
+
+function singleSegmentFileName(id: string, stem: string): string {
+  const filename = `${stem}.yml`;
   if (!isSinglePathSegment(filename)) {
     throw flowValidationFailed(`Invalid flow id: ${id}`, id);
   }
   return filename;
+}
+
+function isLegacyFlowFile(id: string, filename: string): boolean {
+  return legacyFileName(id) === filename && encodedFileName(id) !== filename;
 }
 
 function assertFlowId(id: string): void {
@@ -210,6 +242,49 @@ function assertRealFlowsDirectory(projectRoot: string, directory: string): void 
     throw flowValidationFailed("Flows directory escapes the project");
   }
   assertNotUnderAuth(realDirectory);
+}
+
+function readSavedFlowText(
+  projectRoot: string,
+  id: string,
+  filePath: string,
+): string {
+  if (isRegularFile(filePath)) {
+    return readFlowText(filePath, id);
+  }
+  const legacyPath = legacyFlowFilePath(projectRoot, id);
+  if (legacyPath !== filePath && isRegularFile(legacyPath)) {
+    return readFlowText(legacyPath, id);
+  }
+  return readFlowText(filePath, id);
+}
+
+function removeReplacedLegacyFile(
+  projectRoot: string,
+  id: string,
+  canonicalPath: string,
+): void {
+  const legacyPath = legacyFlowFilePath(projectRoot, id);
+  if (legacyPath === canonicalPath || !isRegularFile(legacyPath)) {
+    return;
+  }
+  const existing = parseFlow(readFileSync(legacyPath, "utf8"), "yaml");
+  if (existing.id !== id) {
+    return;
+  }
+  unlinkSync(legacyPath);
+}
+
+function isRegularFile(filePath: string): boolean {
+  try {
+    const info = lstatSync(filePath);
+    return !info.isSymbolicLink() && info.isFile();
+  } catch (error) {
+    if (isEnoent(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function readFlowText(filePath: string, id: string): string {
