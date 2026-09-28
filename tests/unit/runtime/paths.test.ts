@@ -1,4 +1,11 @@
-import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -73,4 +80,24 @@ test("projectId ../escape throws", () => {
   expect(() => authDir("../escape")).toThrowError(
     new Error("Invalid project id: ../escape"),
   );
+});
+
+test("rejects . and an empty project id", () => {
+  expect(() => authDir(".")).toThrowError(new Error("Invalid project id: ."));
+  expect(() => authDir("")).toThrowError(new Error("Invalid project id: "));
+});
+
+test("does not chmod a layout directory through a symlink", () => {
+  const outside = mkdtempSync(join(tmpdir(), "autonomous-qa-outside-"));
+  chmodSync(outside, 0o755);
+  const before = statSync(outside).mode & 0o777;
+  symlinkSync(outside, join(home, "logs"));
+
+  expect(() => ensureHomeLayout()).toThrowError(
+    new Error(`Refusing to follow a symlink: ${join(home, "logs")}`),
+  );
+  expect(before).toBe(0o755);
+  expect(statSync(outside).mode & 0o777).toBe(0o755);
+
+  rmSync(outside, { recursive: true, force: true });
 });

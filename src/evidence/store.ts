@@ -1,13 +1,23 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { homeDir } from "../runtime/paths.js";
 import { redactBody, redactHeaders } from "../security/redaction.js";
 import {
@@ -79,6 +89,7 @@ export function attach(
 export function readRun(projectRoot: string, runId: string): RunResult {
   const runDir = resolveRunDir(projectRoot, runId);
   const filePath = join(runDir, RESULT_FILE);
+  assertContained(runDir, filePath);
   if (!existsSync(filePath)) {
     throw new Error(`Run not found: ${runId}`);
   }
@@ -130,13 +141,10 @@ function assertSafeRunId(runId: string): void {
 }
 
 function assertNotUnderAuth(runDir: string): void {
-  const candidates = [resolve(runDir)];
-  if (existsSync(runDir)) {
-    candidates.push(realpathSync(runDir));
-  }
+  const candidates = [resolve(runDir), canonicalPath(runDir)];
   for (const candidate of candidates) {
     for (const authRoot of authRoots()) {
-      const root = existsSync(authRoot) ? realpathSync(authRoot) : resolve(authRoot);
+      const root = canonicalPath(authRoot);
       if (isLexicalInside(root, candidate)) {
         throw new Error("Refusing to write auth files");
       }
@@ -244,9 +252,6 @@ function toStoredArtifactPath(runDir: string, artifactPath: string): string {
   if (!isAbsolute(artifactPath)) {
     assertRelativeSafe(artifactPath.split(sep).join("/"));
   }
-  if (existsSync(resolved)) {
-    assertContained(runDir, realpathSync(resolved));
-  }
 
   const stored = relative(resolve(runDir), resolved).split(sep).join("/");
   assertRelativeSafe(stored);
@@ -276,11 +281,78 @@ function assertContained(parent: string, child: string): void {
   if (!isLexicalInside(parent, child)) {
     throw new Error("Invalid artifact path");
   }
-  if (existsSync(parent) && existsSync(child)) {
-    if (!isLexicalInside(realpathSync(parent), realpathSync(child))) {
-      throw new Error("Invalid artifact path");
+  assertRealContained(parent, child);
+}
+
+function assertRealContained(parent: string, child: string): void {
+  if (!isLexicalInside(canonicalPath(parent), canonicalPath(child))) {
+    throw new Error("Invalid artifact path");
+  }
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return canonicalize(resolve(path), new Set<string>());
+  } catch (error) {
+    if (isInvalidArtifact(error)) {
+      throw error;
+    }
+    throw new Error("Invalid artifact path");
+  }
+}
+
+function canonicalize(absolute: string, seen: Set<string>): string {
+  if (seen.has(absolute)) {
+    throw new Error("Invalid artifact path");
+  }
+  seen.add(absolute);
+
+  if (!entryExists(absolute)) {
+    const parent = dirname(absolute);
+    if (parent === absolute) {
+      return absolute;
+    }
+    return join(canonicalize(parent, seen), basename(absolute));
+  }
+
+  if (lstatSync(absolute).isSymbolicLink()) {
+    try {
+      return realpathSync(absolute);
+    } catch (error) {
+      if (!isEnoent(error)) {
+        throw new Error("Invalid artifact path");
+      }
+      const link = readlinkSync(absolute);
+      return canonicalize(resolve(dirname(absolute), link), seen);
     }
   }
+
+  return realpathSync(absolute);
+}
+
+function entryExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (isEnoent(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
+function isInvalidArtifact(error: unknown): boolean {
+  return error instanceof Error && error.message === "Invalid artifact path";
 }
 
 function isLexicalInside(parent: string, child: string): boolean {

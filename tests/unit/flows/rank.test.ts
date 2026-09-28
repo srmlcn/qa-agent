@@ -1,7 +1,10 @@
 import { expect, test } from "vitest";
 import { chooseLocator, rankCandidates } from "../../../src/flows/rank.js";
 import type { Locator } from "../../../src/flows/schema.js";
-import type { DiscoveryAction } from "../../../src/stagehand/trajectory.js";
+import {
+  fromAgentResult,
+  type DiscoveryAction,
+} from "../../../src/stagehand/trajectory.js";
 
 const ordered: readonly Locator[] = [
   { type: "role", role: "button", name: "Save" },
@@ -123,6 +126,41 @@ test("rankCandidates rejects a list with no rankable locator", () => {
   ).toThrow(/rankable/);
 });
 
+test("chooseLocator ranks role hints copied from an agent record", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "click",
+          method: "click",
+          action: "click save",
+          selector: "xpath=//button[1]",
+          role: "button",
+          accessibleName: "Save",
+          "aria-label": "Save button",
+        },
+      ],
+    },
+    {
+      startedAt: "2026-09-26T19:00:00.000Z",
+      endedAt: "2026-09-26T19:00:04.000Z",
+    },
+  );
+  const action = trajectory.actions[0];
+
+  expect(action).toMatchObject({
+    role: "button",
+    accessibleName: "Save",
+    "aria-label": "Save button",
+  });
+  expect(action && chooseLocator(action)).toEqual({
+    type: "role",
+    role: "button",
+    name: "Save",
+  });
+});
+
 test("chooseLocator prefers role when the action also has xpath", () => {
   expect(
     chooseLocator(
@@ -166,11 +204,22 @@ test("chooseLocator reads a role selector and accessible name fields", () => {
   ).toEqual({ type: "role", role: "button", name: "Save" });
 
   const record = discovered({ selector: "//button" });
-  expect(
-    chooseLocator(
-      Object.assign(record, { role: "button", accessibleName: "Save" }),
-    ),
-  ).toEqual({ type: "role", role: "button", name: "Save" });
+  record.role = "button";
+  record.accessibleName = "Save";
+  expect(chooseLocator(record)).toEqual({
+    type: "role",
+    role: "button",
+    name: "Save",
+  });
+
+  const labeled = discovered({ selector: "//button" });
+  labeled.role = "button";
+  labeled["aria-label"] = "Close";
+  expect(chooseLocator(labeled)).toEqual({
+    type: "role",
+    role: "button",
+    name: "Close",
+  });
 
   expect(
     chooseLocator(

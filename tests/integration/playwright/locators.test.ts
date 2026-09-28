@@ -202,6 +202,40 @@ test("escapes attribute quotes so the selector stays exact", async () => {
   ).toEqual(["weird-name"]);
 });
 
+test("escapes CSS string controls without breaking the selector", async () => {
+  const cases = [
+    ["css-nl", "a\nb"],
+    ["css-cr", "a\rb"],
+    ["css-ff", "a\fb"],
+    ["css-nl-hex", "\n0"],
+    ["css-mix", 'say "hi"\\\n\r\f'],
+  ] as const;
+  await session.page.evaluate((entries) => {
+    for (const [id, value] of entries) {
+      const element = document.createElement("span");
+      element.id = id;
+      element.setAttribute("data-raw", value);
+      document.body.appendChild(element);
+    }
+  }, cases);
+
+  for (const [id, value] of cases) {
+    expect(
+      await matchedIds(
+        toLocator(session.page, { type: "attr", name: "data-raw", value }),
+      ),
+    ).toEqual([id]);
+  }
+
+  await expect(
+    toLocator(session.page, {
+      type: "attr",
+      name: "data-raw",
+      value: "a\0b",
+    }).count(),
+  ).resolves.toBe(0);
+});
+
 test("resolves css and xpath selectors", async () => {
   expect(
     await matchedIds(

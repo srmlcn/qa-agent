@@ -63,6 +63,8 @@ export type RepairFlowResult =
 
 /**
  * Repairs a stale flow when the failed run's category is `locator`.
+ * The stored run must belong to this flow. A missing run and a run recorded
+ * for a different flow are both `run not found`, and neither starts discovery.
  * Any other category is a product failure: the discovery client is not called.
  * A successful replay follows stale -> repaired -> validated and archives the
  * previous spec under the original run. The original run result stays readable.
@@ -170,19 +172,35 @@ function loadFailedRun(
   runId: string,
   flowId: string,
 ): RunResult {
+  const failedRun = readStoredRun(projectRoot, runId, flowId);
+  if (failedRun.flowId !== flowId) {
+    throw runNotFound(runId, flowId);
+  }
+  return failedRun;
+}
+
+function readStoredRun(
+  projectRoot: string,
+  runId: string,
+  flowId: string,
+): RunResult {
   try {
     return readRun(projectRoot, runId);
   } catch (error) {
     if (isMissingRun(error)) {
-      throw new QaError({
-        code: "FLOW_VALIDATION_FAILED",
-        message: "run not found",
-        runId,
-        flowId,
-      });
+      throw runNotFound(runId, flowId);
     }
     throw error;
   }
+}
+
+function runNotFound(runId: string, flowId: string): QaError {
+  return new QaError({
+    code: "FLOW_VALIDATION_FAILED",
+    message: "run not found",
+    runId,
+    flowId,
+  });
 }
 
 function isMissingRun(error: unknown): boolean {

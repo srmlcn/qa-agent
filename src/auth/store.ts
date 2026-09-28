@@ -2,7 +2,9 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -95,7 +97,7 @@ export function readProfilePath(projectId: string, profile: string): string {
  * Callers must not print the return value of readProfile.
  */
 export function readProfile(projectId: string, profile: string): StorageState {
-  const text = readFileSync(readProfilePath(projectId, profile), "utf8");
+  const text = readProfileFile(profileFile(projectId, profile));
   let parsed: unknown;
   try {
     parsed = parseJson(text);
@@ -244,6 +246,194 @@ function assertWritableTarget(filePath: string): void {
   }
 }
 
+/**
+ * Opens the profile from a home-directory descriptor. Each component is opened
+ * without following symlinks, and the leaf is non-blocking so a FIFO cannot
+ * hang the process before its descriptor is rejected.
+ * Windows does not enforce O_NOFOLLOW and does not implement fchmodSync, so
+ * that platform lstats each parent and opens the leaf without those calls.
+ */
+function readProfileFile(filePath: string): string {
+  const home = resolve(homeDir());
+  const parts = componentsUnderHome(home, filePath);
+  const leaf = parts[parts.length - 1];
+  const directories = parts.slice(0, -1);
+  if (leaf === undefined || directories.length === 0) {
+    throw new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Invalid auth profile path",
+    });
+  }
+  if (process.platform === "win32") {
+    return readProfileWithoutFollowWindows(home, directories, leaf);
+  }
+  return readProfileAnchored(home, directories, leaf);
+}
+
+function readProfileAnchored(
+  home: string,
+  directories: string[],
+  leaf: string,
+): string {
+  const fds: number[] = [];
+  try {
+    let dirFd = openSync(home, constants.O_RDONLY | constants.O_DIRECTORY);
+    fds.push(dirFd);
+    for (const name of directories) {
+      dirFd = openSync(descriptorPath(dirFd, name), directoryOpenFlags());
+      fds.push(dirFd);
+    }
+    const fileFd = openSync(descriptorPath(dirFd, leaf), leafOpenFlags());
+    fds.push(fileFd);
+    return readRegularDescriptor(fileFd);
+  } catch (error) {
+    throw profileOpenError(error);
+  } finally {
+    closeDescriptors(fds);
+  }
+}
+
+function readProfileWithoutFollowWindows(
+  home: string,
+  directories: string[],
+  leaf: string,
+): string {
+  let current = home;
+  for (const name of directories) {
+    current = join(current, name);
+    assertDirectoryComponent(current);
+  }
+  const filePath = join(current, leaf);
+  assertLeafComponent(filePath);
+  let fd: number;
+  try {
+    fd = openNonBlocking(filePath);
+  } catch (error) {
+    throw profileOpenError(error);
+  }
+  try {
+    return readRegularDescriptor(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function assertDirectoryComponent(path: string): void {
+  let info: ReturnType<typeof lstatSync>;
+  try {
+    info = lstatSync(path);
+  } catch (error) {
+    throw profileOpenError(error);
+  }
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw notRegularFile();
+  }
+}
+
+function assertLeafComponent(path: string): void {
+  let info: ReturnType<typeof lstatSync>;
+  try {
+    info = lstatSync(path);
+  } catch (error) {
+    throw profileOpenError(error);
+  }
+  if (info.isSymbolicLink() || !info.isFile()) {
+    throw notRegularFile();
+  }
+}
+
+function readRegularDescriptor(fd: number): string {
+  const info = fstatSync(fd);
+  if (info.isSymbolicLink() || !info.isFile()) {
+    throw notRegularFile();
+  }
+  return readFileSync(fd, "utf8");
+}
+
+function componentsUnderHome(home: string, filePath: string): string[] {
+  const relativePath = relative(home, resolve(filePath));
+  if (
+    relativePath === "" ||
+    relativePath.startsWith(`..${sep}`) ||
+    relativePath === ".." ||
+    relativePath.split(sep).includes("..")
+  ) {
+    throw new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Refusing to access an auth path outside the home directory",
+    });
+  }
+  const parts = relativePath.split(sep);
+  if (
+    parts.some(
+      (part) =>
+        part.length === 0 ||
+        part === "." ||
+        part === ".." ||
+        part.includes("/") ||
+        part.includes("\\") ||
+        part.includes("\0"),
+    )
+  ) {
+    throw new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Invalid auth profile path",
+    });
+  }
+  return parts;
+}
+
+function descriptorPath(dirFd: number, name: string): string {
+  return `/proc/self/fd/${dirFd}/${name}`;
+}
+
+function directoryOpenFlags(): number {
+  return (
+    constants.O_RDONLY |
+    constants.O_NOFOLLOW |
+    constants.O_DIRECTORY |
+    constants.O_NONBLOCK
+  );
+}
+
+function leafOpenFlags(): number {
+  return constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+}
+
+function openNonBlocking(path: string): number {
+  try {
+    return openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    if (isCode(error, "EINVAL")) {
+      return openSync(path, constants.O_RDONLY);
+    }
+    throw error;
+  }
+}
+
+function profileOpenError(error: unknown): never {
+  if (error instanceof QaError) {
+    throw error;
+  }
+  if (isNotFound(error)) {
+    throw missingProfile();
+  }
+  if (
+    isCode(error, "ELOOP") ||
+    isCode(error, "ENOTDIR") ||
+    isCode(error, "EISDIR")
+  ) {
+    throw notRegularFile();
+  }
+  throw error;
+}
+
+function closeDescriptors(fds: number[]): void {
+  for (const fd of fds.reverse()) {
+    closeSync(fd);
+  }
+}
+
 function requireRegularFile(filePath: string): void {
   let info: ReturnType<typeof lstatSync>;
   try {
@@ -255,10 +445,7 @@ function requireRegularFile(filePath: string): void {
     throw error;
   }
   if (info.isSymbolicLink() || !info.isFile()) {
-    throw new QaError({
-      code: "POLICY_BLOCKED",
-      message: "Refusing to use an auth path that is not a regular file",
-    });
+    throw notRegularFile();
   }
   assertUnderHome(filePath);
 }
@@ -395,6 +582,13 @@ function profileNameFromFile(filename: string): string | undefined {
   return profile;
 }
 
+function notRegularFile(): QaError {
+  return new QaError({
+    code: "POLICY_BLOCKED",
+    message: "Refusing to use an auth path that is not a regular file",
+  });
+}
+
 function missingProfile(): QaError {
   return new QaError({
     code: "AUTH_MISSING",
@@ -476,5 +670,9 @@ function parseJson(text: string): unknown {
 }
 
 function isNotFound(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
+  return isCode(error, "ENOENT");
+}
+
+function isCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
 }

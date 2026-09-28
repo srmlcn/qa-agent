@@ -16,7 +16,7 @@ type FakeBrowser = {
   contextClose: () => Promise<void>;
   browserClose: () => Promise<void>;
   connected: () => boolean;
-  pid: number;
+  pid?: number;
 };
 
 afterEach(() => {
@@ -96,6 +96,68 @@ test(
   15_000,
 );
 
+test(
+  "a hung close that leaves Chromium connected fails",
+  async () => {
+    vi.useFakeTimers();
+    installBrowser({
+      pageClose: async () => undefined,
+      contextClose: async () => undefined,
+      browserClose: () => new Promise(() => undefined),
+      connected: () => true,
+      pid: 4242,
+    });
+    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      expect(pid).toBe(-4242);
+      expect(signal).toBe("SIGKILL");
+      return true;
+    });
+
+    const session = await startBrowser({ headless: true });
+    const pending = session.close();
+    const failed = expect(pending).rejects.toMatchObject({
+      code: "BROWSER_CRASHED",
+      message: "Failed to close Chromium.",
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await failed;
+    await expect(pending).rejects.toBeInstanceOf(QaError);
+
+    expect(kill).toHaveBeenCalledWith(-4242, "SIGKILL");
+    expect(session.browser.isConnected()).toBe(true);
+  },
+  15_000,
+);
+
+test(
+  "a hung close fails when the browser process cannot be killed",
+  async () => {
+    vi.useFakeTimers();
+    installBrowser({
+      pageClose: async () => undefined,
+      contextClose: async () => undefined,
+      browserClose: () => new Promise(() => undefined),
+      connected: () => true,
+    });
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("process.kill should not run");
+    });
+
+    const session = await startBrowser({ headless: true });
+    const pending = session.close();
+    const failed = expect(pending).rejects.toMatchObject({
+      code: "BROWSER_CRASHED",
+      message: "Failed to close Chromium.",
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await failed;
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(session.browser.isConnected()).toBe(true);
+  },
+  15_000,
+);
+
 function installBrowser(fake: FakeBrowser): void {
   const browser = {
     isConnected: () => fake.connected(),
@@ -109,13 +171,16 @@ function installBrowser(fake: FakeBrowser): void {
       }),
     }),
     _connection: {
-      toImpl: () => ({
-        options: {
-          browserProcess: {
-            process: { pid: fake.pid, kill: vi.fn() },
-          },
-        },
-      }),
+      toImpl: () =>
+        fake.pid === undefined
+          ? null
+          : {
+              options: {
+                browserProcess: {
+                  process: { pid: fake.pid, kill: vi.fn() },
+                },
+              },
+            },
     },
   };
   launch.mockResolvedValue(browser);

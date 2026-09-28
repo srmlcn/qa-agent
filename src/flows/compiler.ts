@@ -280,16 +280,30 @@ function targetLabel(
   if (flowAction === "goto" && value !== undefined) {
     return value;
   }
-  if (locator?.type === "role") {
-    return locator.name;
-  }
-  if (locator?.type === "css" || locator?.type === "xpath") {
-    return locator.selector;
+  if (locator !== undefined) {
+    return locatorTarget(locator);
   }
   if (flowAction === "waitFor" && value !== undefined) {
     return value;
   }
   return "";
+}
+
+function locatorTarget(locator: Locator): string {
+  switch (locator.type) {
+    case "role":
+    case "label":
+    case "testid":
+      return locator.name;
+    case "placeholder":
+    case "attr":
+      return locator.value;
+    case "text":
+      return locator.text;
+    case "css":
+    case "xpath":
+      return locator.selector;
+  }
 }
 
 function actionValue(
@@ -369,6 +383,38 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Kinds `chooseLocator` can return, in rank preference order.
+ * The missing-locator error is built from this record so it cannot
+ * omit a kind the compiler accepts.
+ */
+const ACCEPTED_LOCATOR_KINDS = {
+  role: "role",
+  label: "label",
+  placeholder: "placeholder",
+  text: "text",
+  testid: "testid",
+  attr: "attr",
+  css: "css",
+  xpath: "xpath",
+} as const satisfies Record<Locator["type"], string>;
+
+const ACCEPTED_LOCATOR_LIST = formatAcceptedLocators(ACCEPTED_LOCATOR_KINDS);
+
+function formatAcceptedLocators(
+  kinds: Readonly<Record<Locator["type"], string>>,
+): string {
+  const names = Object.keys(kinds);
+  const last = names[names.length - 1];
+  if (last === undefined) {
+    return "supported";
+  }
+  if (names.length === 1) {
+    return last;
+  }
+  return `${names.slice(0, -1).join(", ")}, or ${last}`;
+}
+
 function requiredLocator(
   locator: Locator | undefined,
   flowId: string,
@@ -379,7 +425,7 @@ function requiredLocator(
     throw compileFailed(
       flowId,
       stepId,
-      `Action at index ${index} has no role, CSS, or XPath locator.`,
+      `Action at index ${index} has no ${ACCEPTED_LOCATOR_LIST} locator.`,
     );
   }
   return locator;

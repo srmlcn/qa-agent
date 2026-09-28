@@ -112,6 +112,71 @@ test("headers copy config headers and add the bearer token in process", () => {
   expect(provider.headers).not.toBe(headers);
 });
 
+test("a missing env key removes every Authorization header", () => {
+  const headers = {
+    "X-Tenant": "acme",
+    Authorization: "Bearer configured-secret",
+    authorization: "Basic configured-basic",
+    AUTHORIZATION: "configured-raw",
+  };
+  const provider = createProvider(llmConfig({ headers }));
+  const description = describeProvider(provider);
+
+  expect(headers.Authorization).toBe("Bearer configured-secret");
+  expect(provider.headers).toEqual({ "X-Tenant": "acme" });
+  expect(description.headers).toEqual({ "X-Tenant": "acme" });
+  expect(description.apiKeyPresent).toBe(false);
+  expect(JSON.stringify(provider)).not.toContain("configured-secret");
+  expect(JSON.stringify(provider)).not.toContain("configured-basic");
+  expect(JSON.stringify(provider)).not.toContain("configured-raw");
+  expect(JSON.stringify(description)).not.toContain("configured");
+});
+
+test("an empty env key removes every Authorization header", () => {
+  process.env[API_KEY_ENV] = "";
+  const provider = createProvider(
+    llmConfig({
+      headers: {
+        "X-Tenant": "acme",
+        Authorization: "Bearer configured-secret",
+        authorization: "Basic configured-basic",
+      },
+    }),
+  );
+  const description = describeProvider(provider);
+
+  expect(provider.headers).toEqual({ "X-Tenant": "acme" });
+  expect(description.headers).toEqual({ "X-Tenant": "acme" });
+  expect(description.apiKeyPresent).toBe(false);
+  expect(JSON.stringify(provider)).not.toContain("configured-secret");
+  expect(JSON.stringify(description)).not.toContain("configured");
+});
+
+test("a present env key replaces every configured Authorization header", () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(
+    llmConfig({
+      headers: {
+        "X-Tenant": "acme",
+        authorization: "stale",
+        Authorization: "Bearer configured-secret",
+        AUTHORIZATION: "configured-raw",
+      },
+    }),
+  );
+  const description = describeProvider(provider);
+
+  expect(provider.headers).toEqual({
+    "X-Tenant": "acme",
+    Authorization: `Bearer ${API_KEY}`,
+  });
+  expect(description.headers).toEqual({ "X-Tenant": "acme" });
+  expect(description.apiKeyPresent).toBe(true);
+  expect(JSON.stringify(description)).not.toContain(API_KEY);
+  expect(JSON.stringify(description)).not.toContain("configured");
+  expect(JSON.stringify(description)).not.toContain("stale");
+});
+
 test("describeProvider JSON omits the key and reports apiKeyPresent", () => {
   process.env[API_KEY_ENV] = API_KEY;
   const provider = createProvider(

@@ -68,7 +68,11 @@ export function redactHeaders(
   return result;
 }
 
-function redactCookiePairList(cookieList: string): string {
+function redactCookiePairList(
+  cookieList: string,
+  preserveAttributes: boolean,
+): string {
+  let seenNameValue = false;
   return cookieList
     .split(";")
     .map((part) => {
@@ -77,8 +81,13 @@ function redactCookiePairList(cookieList: string): string {
         return part;
       }
       const rawName = part.slice(0, separator);
-      const attributeName = rawName.trim().toLowerCase();
-      if (COOKIE_ATTRIBUTE_NAMES.has(attributeName)) {
+      const isFirstNameValue = !seenNameValue;
+      seenNameValue = true;
+      if (
+        preserveAttributes &&
+        !isFirstNameValue &&
+        COOKIE_ATTRIBUTE_NAMES.has(rawName.trim().toLowerCase())
+      ) {
         return part;
       }
       return `${rawName}=${REDACTED}`;
@@ -88,9 +97,18 @@ function redactCookiePairList(cookieList: string): string {
 
 function redactCookieHeaders(text: string): string {
   return text.replace(
-    /^([ \t]*(?:set-)?cookie[ \t]*:[ \t]*)(.*)$/gim,
-    (_match, prefix: string, value: string) =>
-      `${prefix}${redactCookiePairList(value)}`,
+    /^([ \t]*)((?:set-)?cookie)([ \t]*:[ \t]*)(.*)$/gim,
+    (
+      _match,
+      indent: string,
+      name: string,
+      separator: string,
+      value: string,
+    ) =>
+      `${indent}${name}${separator}${redactCookiePairList(
+        value,
+        name.toLowerCase() === "set-cookie",
+      )}`,
   );
 }
 
@@ -99,7 +117,7 @@ function redactDocumentCookieAssignments(text: string): string {
     /document\.cookie[ \t]*=[ \t]*(["'])([\s\S]*?)\1/gi,
     (match, quote: string, value: string) => {
       const prefix = match.slice(0, match.indexOf(quote));
-      return `${prefix}${quote}${redactCookiePairList(value)}${quote}`;
+      return `${prefix}${quote}${redactCookiePairList(value, true)}${quote}`;
     },
   );
 }
@@ -210,7 +228,7 @@ export function redactCookies(text: string): string {
     redactDocumentCookieAssignments(text),
   );
   if (looksLikeCookiePairList(withAssignments)) {
-    return redactCookiePairList(withAssignments);
+    return redactCookiePairList(withAssignments, false);
   }
   return withAssignments;
 }

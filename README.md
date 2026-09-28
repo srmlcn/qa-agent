@@ -68,7 +68,7 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
      apiKeyEnv: COMPANY_LLM_API_KEY
    ```
 
-4. Init prints this MCP server block:
+4. Init prints this MCP server block. `src/cli/commands/init.ts` writes `"command": "autonomous-qa"` with `"args": ["mcp"]`. That command is on `PATH` only after `npm link`. Cursor cannot start the server until the link exists.
 
    ```json
    {
@@ -82,7 +82,21 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
    }
    ```
 
-   `autonomous-qa init --install-mcp` writes that server into `.cursor/mcp.json`.
+   `autonomous-qa init --install-mcp` writes that same server into `.cursor/mcp.json`.
+
+   A checkout started with `node dist/cli/main.js` uses this server when the `autonomous-qa` binary is not linked. The `args` path is the absolute path to `dist/cli/main.js` in the checkout. `init` writes the `autonomous-qa` command above, so replace the server entry by hand when you use this form:
+
+   ```json
+   {
+     "mcpServers": {
+       "autonomous-qa": {
+         "type": "stdio",
+         "command": "node",
+         "args": ["/absolute/path/to/checkout/dist/cli/main.js", "mcp"]
+       }
+     }
+   }
+   ```
 
 5. Capture an auth profile with `autonomous-qa auth capture --project <project-id> --profile <profile> --url <start-url>`. The command is implemented in `src/cli/commands/auth.ts`. It writes the profile file to `<home>/auth/<project-id>/<profile>.json`. Home defaults to `~/.autonomous-qa` and can be overridden with `AUTONOMOUS_QA_HOME`.
 

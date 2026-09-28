@@ -1,4 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,6 +132,85 @@ test("readProfilePath throws AUTH_MISSING when the profile is absent", () => {
   );
 });
 
+test("readProfile throws AUTH_MISSING when the profile is absent", () => {
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "AUTH_MISSING",
+      message: "Auth profile is missing",
+    }),
+  );
+});
+
+test("readProfile refuses a symlink", () => {
+  const saved = saveProfile("billing", "admin", sampleState());
+  const leaked = join(home, "leaked.json");
+  writeFileSync(
+    leaked,
+    `${JSON.stringify({ cookies: [], origins: [], leaked: COOKIE_VALUE })}\n`,
+  );
+  unlinkSync(saved.path);
+  symlinkSync(leaked, saved.path);
+
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Refusing to use an auth path that is not a regular file",
+    }),
+  );
+});
+
+test("readProfile refuses a symlink parent directory", () => {
+  saveProfile("billing", "admin", sampleState());
+  const projectDir = join(home, "auth", "billing");
+  const elsewhere = join(home, "elsewhere");
+  mkdirSync(elsewhere);
+  const leaked = "leaked-cookie-value";
+  writeFileSync(
+    join(elsewhere, "admin.json"),
+    `${JSON.stringify(storageState(leaked))}\n`,
+  );
+  rmSync(projectDir, { recursive: true });
+  symlinkSync(elsewhere, projectDir);
+
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Refusing to use an auth path that is not a regular file",
+    }),
+  );
+});
+
+test.skipIf(process.platform === "win32")(
+  "readProfile refuses a fifo without waiting for a writer",
+  () => {
+    const saved = saveProfile("billing", "admin", sampleState());
+    unlinkSync(saved.path);
+    execFileSync("mkfifo", [saved.path]);
+
+    const started = Date.now();
+    expect(() => readProfile("billing", "admin")).toThrowError(
+      new QaError({
+        code: "POLICY_BLOCKED",
+        message: "Refusing to use an auth path that is not a regular file",
+      }),
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+  },
+);
+
+test("readProfile refuses a directory checked through its descriptor", () => {
+  const saved = saveProfile("billing", "admin", sampleState());
+  unlinkSync(saved.path);
+  mkdirSync(saved.path);
+
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Refusing to use an auth path that is not a regular file",
+    }),
+  );
+});
+
 test("readProfile returns storage state in-process and is not logged", () => {
   const stderr = vi.spyOn(process.stderr, "write");
   const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -196,11 +285,15 @@ function fileMode(path: string): number {
 }
 
 function sampleState(): StorageState {
+  return storageState(COOKIE_VALUE);
+}
+
+function storageState(value: string): StorageState {
   return {
     cookies: [
       {
         name: "session",
-        value: COOKIE_VALUE,
+        value,
         domain: "example.test",
         path: "/",
         expires: -1,

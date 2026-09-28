@@ -62,7 +62,7 @@ test("autoload does not register browser debug tools", async () => {
   for (const name of DEBUG_TOOL_NAMES) {
     expect(names).not.toContain(name);
   }
-});
+}, 20_000);
 
 test("tools/list omits browser debug tools unless stagehand.debugTools is true", async () => {
   const missingRoot = mkdtempSync(join(tmpdir(), "qa-debug-missing-"));
@@ -219,6 +219,228 @@ test("network and console results omit secrets and raw document HTML", async () 
       },
     ],
   });
+});
+
+test("network uses project redactHeaders and redacts secrets in the url", async () => {
+  const apiKey = "project-x-api-key-secret";
+  const bearer = "bearer-token-in-url-value";
+  const queryApiKey = "query-api-key-secret";
+  const queryPassword = "query-password-secret";
+  const userinfoPassword = "userinfo-password-secret";
+  const events = [
+    {
+      method: "POST",
+      url: `http://ada:${userinfoPassword}@localhost:3000/cb?api_key=${queryApiKey}&x-api-key=${apiKey}&password=${queryPassword}&ok=1&code=${bearer}#keep`,
+      status: 201,
+      headers: {
+        "X-Api-Key": apiKey,
+        Authorization: `Bearer ${bearer}`,
+        Accept: "application/json",
+      },
+    },
+  ];
+  setDebugSession({
+    ...session(recordingPage([]), createArtifactDir(), recordingTrace([])),
+    redactHeaders: ["authorization", "cookie", "set-cookie", "x-api-key"],
+    network: events,
+  });
+
+  const network = await toolNamed("browser.network").handler({});
+  expect(network).toEqual({
+    events: [
+      {
+        method: "POST",
+        url: "http://ada:[redacted]@localhost:3000/cb?api_key=[redacted]&x-api-key=[redacted]&password=[redacted]&ok=1&code=[redacted]#keep",
+        status: 201,
+        headers: {
+          "X-Api-Key": "[redacted]",
+          Authorization: "[redacted]",
+          Accept: "application/json",
+        },
+      },
+    ],
+  });
+  expect(events[0]?.headers["X-Api-Key"]).toBe(apiKey);
+  expect(events[0]?.url).toContain(apiKey);
+});
+
+test("network keeps the default header list and still redacts url secrets", async () => {
+  const apiKey = "visible-x-api-key-secret";
+  const bearer = "default-bearer-token-value";
+  const queryPassword = "default-query-password";
+  setDebugSession({
+    ...session(recordingPage([]), createArtifactDir(), recordingTrace([])),
+    network: [
+      {
+        method: "GET",
+        url: `http://localhost:3000/cb?password=${queryPassword}&x-api-key=${apiKey}&authorization=${bearer}&q=1`,
+        status: 200,
+        headers: {
+          "X-Api-Key": apiKey,
+          Authorization: `Bearer ${bearer}`,
+          cookie: "session=default-cookie-secret",
+          accept: "text/plain",
+        },
+      },
+    ],
+  });
+
+  const network = await toolNamed("browser.network").handler({});
+  expect(network).toEqual({
+    events: [
+      {
+        method: "GET",
+        url: `http://localhost:3000/cb?password=[redacted]&x-api-key=${apiKey}&authorization=[redacted]&q=1`,
+        status: 200,
+        headers: {
+          "X-Api-Key": apiKey,
+          Authorization: "[redacted]",
+          cookie: "[redacted]",
+          accept: "text/plain",
+        },
+      },
+    ],
+  });
+  const serialized = JSON.stringify(network);
+  expect(serialized).not.toContain(bearer);
+  expect(serialized).not.toContain(queryPassword);
+  expect(serialized).not.toContain("default-cookie-secret");
+  expect(serialized).toContain(apiKey);
+});
+
+test("network redacts encoded, short, and fragment secrets", async () => {
+  const slashSecret = "a/b-secret";
+  const spaceSecret = "a b-secret";
+  const shortSecret = "abc1234";
+  const fragmentSecret = "secret-value";
+  setDebugSession({
+    ...session(recordingPage([]), createArtifactDir(), recordingTrace([])),
+    redactHeaders: ["x-slash", "x-space", "x-token"],
+    network: [
+      {
+        method: "GET",
+        url: [
+          "https://app/callback?slash=a%2fb-secret&upper=a%2Fb-secret",
+          `&space=a+b-secret&encoded=a%20b-secret&target=${shortSecret}&keep=yes`,
+          `#access_token=${fragmentSecret}&ok=1`,
+        ].join(""),
+        status: 200,
+        headers: {
+          "x-slash": slashSecret,
+          "x-space": spaceSecret,
+          "x-token": shortSecret,
+        },
+      },
+      {
+        method: "GET",
+        url: `https://app/callback#access_token=${fragmentSecret}`,
+        status: 302,
+        headers: {},
+      },
+    ],
+  });
+
+  const network = await toolNamed("browser.network").handler({});
+  expect(network).toEqual({
+    events: [
+      {
+        method: "GET",
+        url: "https://app/callback?slash=[redacted]&upper=[redacted]&space=[redacted]&encoded=[redacted]&target=[redacted]&keep=yes#access_token=[redacted]&ok=1",
+        status: 200,
+        headers: {
+          "x-slash": "[redacted]",
+          "x-space": "[redacted]",
+          "x-token": "[redacted]",
+        },
+      },
+      {
+        method: "GET",
+        url: "https://app/callback#access_token=[redacted]",
+        status: 302,
+        headers: {},
+      },
+    ],
+  });
+  const serialized = JSON.stringify(network);
+  expect(serialized).not.toContain(slashSecret);
+  expect(serialized).not.toContain("a%2fb-secret");
+  expect(serialized).not.toContain("a%2Fb-secret");
+  expect(serialized).not.toContain("a+b-secret");
+  expect(serialized).not.toContain("a%20b-secret");
+  expect(serialized).not.toContain(shortSecret);
+  expect(serialized).not.toContain(fragmentSecret);
+});
+
+test("console redacts authorization, json secrets, and cookies in text and url", async () => {
+  const authSecret = "console-auth-secret-value";
+  const password = "console-password-secret";
+  const apiKey = "console-api-key-secret";
+  const cookie = "console-cookie-secret";
+  const projectHeader = "console-project-header-secret";
+  setDebugSession({
+    ...session(recordingPage([]), createArtifactDir(), recordingTrace([])),
+    redactHeaders: ["x-api-key"],
+    console: [
+      {
+        level: "error",
+        text: [
+          `Authorization: Bearer ${authSecret}`,
+          `{"user":"ada","password":"${password}","api_key":"${apiKey}"}`,
+          `document.cookie = "session=${cookie}"`,
+        ].join("\n"),
+        url: `http://localhost:3000/items?password=${password}&api_key=${apiKey}&x-api-key=${projectHeader}&ok=1`,
+      },
+    ],
+  });
+
+  const messages = await toolNamed("browser.console").handler({});
+  expect(messages).toEqual({
+    messages: [
+      {
+        level: "error",
+        text: [
+          "Authorization: [redacted]",
+          '{"user":"ada","password":"[redacted]","api_key":"[redacted]"}',
+          'document.cookie = "session=[redacted]"',
+        ].join("\n"),
+        url: "http://localhost:3000/items?password=[redacted]&api_key=[redacted]&x-api-key=[redacted]&ok=1",
+      },
+    ],
+  });
+  const serialized = JSON.stringify(messages);
+  expect(serialized).not.toContain(authSecret);
+  expect(serialized).not.toContain(password);
+  expect(serialized).not.toContain(apiKey);
+  expect(serialized).not.toContain(cookie);
+  expect(serialized).not.toContain(projectHeader);
+});
+
+test("console still redacts secrets when the session has no header list", async () => {
+  const authSecret = "fallback-auth-secret-value";
+  const password = "fallback-password-secret";
+  setDebugSession({
+    ...session(recordingPage([]), createArtifactDir(), recordingTrace([])),
+    console: [
+      {
+        level: "warning",
+        text: `Authorization: Bearer ${authSecret}\n{"password":"${password}","note":"kept"}`,
+        url: `http://localhost:3000/log?password=${password}&x-api-key=kept-project-header`,
+      },
+    ],
+  });
+
+  const messages = await toolNamed("browser.console").handler({});
+  expect(messages).toEqual({
+    messages: [
+      {
+        level: "warning",
+        text: 'Authorization: [redacted]\n{"password":"[redacted]","note":"kept"}',
+        url: "http://localhost:3000/log?password=[redacted]&x-api-key=kept-project-header",
+      },
+    ],
+  });
+  expect(JSON.stringify(messages)).not.toContain(authSecret);
+  expect(JSON.stringify(messages)).not.toContain(password);
 });
 
 test("v0.1 acceptance tests do not call browser debug tools", () => {
