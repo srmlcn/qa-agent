@@ -158,11 +158,12 @@ function seal<T extends StepIdentity & { action: LoginAction }>(step: T): Step {
 
 /**
  * Reads a named environment variable.
- * The error names the variable and never includes its value.
+ * A missing or empty string is unset. The error names the variable and never
+ * includes its value.
  */
 function requiredEnv(name: string): string {
   const value = process.env[name];
-  if (value === undefined) {
+  if (value === undefined || value.length === 0) {
     throw new QaError({
       code: "AUTH_MISSING",
       message: `Environment variable ${name} is not set`,
