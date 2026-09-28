@@ -2,7 +2,9 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -95,7 +97,7 @@ export function readProfilePath(projectId: string, profile: string): string {
  * Callers must not print the return value of readProfile.
  */
 export function readProfile(projectId: string, profile: string): StorageState {
-  const text = readFileSync(readProfilePath(projectId, profile), "utf8");
+  const text = readProfileFile(profileFile(projectId, profile));
   let parsed: unknown;
   try {
     parsed = parseJson(text);
@@ -244,6 +246,34 @@ function assertWritableTarget(filePath: string): void {
   }
 }
 
+/**
+ * Opens the profile once. The descriptor is checked before any byte is read,
+ * so a symlink cannot be swapped in between a pathname check and the read.
+ */
+function readProfileFile(filePath: string): string {
+  let fd: number;
+  try {
+    fd = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (isNotFound(error)) {
+      throw missingProfile();
+    }
+    if (isTooManyLinks(error)) {
+      throw notRegularFile();
+    }
+    throw error;
+  }
+  try {
+    const info = fstatSync(fd);
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw notRegularFile();
+    }
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function requireRegularFile(filePath: string): void {
   let info: ReturnType<typeof lstatSync>;
   try {
@@ -255,10 +285,7 @@ function requireRegularFile(filePath: string): void {
     throw error;
   }
   if (info.isSymbolicLink() || !info.isFile()) {
-    throw new QaError({
-      code: "POLICY_BLOCKED",
-      message: "Refusing to use an auth path that is not a regular file",
-    });
+    throw notRegularFile();
   }
   assertUnderHome(filePath);
 }
@@ -395,6 +422,13 @@ function profileNameFromFile(filename: string): string | undefined {
   return profile;
 }
 
+function notRegularFile(): QaError {
+  return new QaError({
+    code: "POLICY_BLOCKED",
+    message: "Refusing to use an auth path that is not a regular file",
+  });
+}
+
 function missingProfile(): QaError {
   return new QaError({
     code: "AUTH_MISSING",
@@ -477,4 +511,8 @@ function parseJson(text: string): unknown {
 
 function isNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isTooManyLinks(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ELOOP";
 }

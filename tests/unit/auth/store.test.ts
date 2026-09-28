@@ -1,4 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,6 +127,46 @@ test("readProfilePath throws AUTH_MISSING when the profile is absent", () => {
     new QaError({
       code: "AUTH_MISSING",
       message: "Auth profile is missing",
+    }),
+  );
+});
+
+test("readProfile throws AUTH_MISSING when the profile is absent", () => {
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "AUTH_MISSING",
+      message: "Auth profile is missing",
+    }),
+  );
+});
+
+test("readProfile refuses a symlink", () => {
+  const saved = saveProfile("billing", "admin", sampleState());
+  const leaked = join(home, "leaked.json");
+  writeFileSync(
+    leaked,
+    `${JSON.stringify({ cookies: [], origins: [], leaked: COOKIE_VALUE })}\n`,
+  );
+  unlinkSync(saved.path);
+  symlinkSync(leaked, saved.path);
+
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Refusing to use an auth path that is not a regular file",
+    }),
+  );
+});
+
+test("readProfile refuses a directory checked through its descriptor", () => {
+  const saved = saveProfile("billing", "admin", sampleState());
+  unlinkSync(saved.path);
+  mkdirSync(saved.path);
+
+  expect(() => readProfile("billing", "admin")).toThrowError(
+    new QaError({
+      code: "POLICY_BLOCKED",
+      message: "Refusing to use an auth path that is not a regular file",
     }),
   );
 });
