@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadCommands } from "./registry.js";
@@ -34,7 +35,7 @@ function isDirectRun(): boolean {
     return false;
   }
 
-  return import.meta.url === pathToFileURL(resolve(entry)).href;
+  return import.meta.url === pathToFileURL(realpathSync(resolve(entry))).href;
 }
 
 if (isDirectRun()) {
