@@ -86,6 +86,8 @@ export async function discover(
   };
   signal?.addEventListener("abort", onAbort);
 
+  let primaryError: unknown;
+  let trajectory: DiscoveryTrajectory | undefined;
   try {
     if (signal?.aborted) {
       throw cancelled();
@@ -101,10 +103,36 @@ export async function discover(
     if (signal?.aborted) {
       throw cancelled();
     }
-    return acceptResult(result, options.maxSteps, startedAt);
+    trajectory = acceptResult(result, options.maxSteps, startedAt);
+  } catch (error: unknown) {
+    primaryError = error;
   } finally {
     signal?.removeEventListener("abort", onAbort);
+    await closeAfter(primaryError, close);
+  }
+
+  if (trajectory === undefined) {
+    throw primaryError;
+  }
+  return trajectory;
+}
+
+/**
+ * Runs cleanup after discovery. A close rejection is attached to an earlier
+ * error so it cannot replace `RUN_CANCELLED` or a discovery failure. With no
+ * earlier error, the close rejection is stored and thrown by the caller.
+ */
+async function closeAfter(
+  primaryError: unknown,
+  close: () => Promise<void>,
+): Promise<void> {
+  try {
     await close();
+  } catch (closeError: unknown) {
+    if (primaryError === undefined) {
+      throw closeError;
+    }
+    attachCloseFailure(primaryError, closeError);
   }
 }
 
@@ -288,6 +316,12 @@ async function capture(
     await job;
   } catch (error: unknown) {
     errors.push(error);
+  }
+}
+
+function attachCloseFailure(primary: unknown, closeError: unknown): void {
+  if (primary instanceof Error && primary.cause === undefined) {
+    primary.cause = closeError;
   }
 }
 
