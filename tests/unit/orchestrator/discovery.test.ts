@@ -132,6 +132,25 @@ test("a draft that already starts with that goto is not opened twice", async () 
   expect(events).toEqual([
     `allow:${START_URL}`,
     `allow:${START_URL}`,
+    `allow:${START_URL}`,
+    "validate",
+  ]);
+  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
+    action: "goto",
+    value: START_URL,
+  });
+});
+
+test("an equivalent leading goto is not opened twice", async () => {
+  vi.mocked(discover).mockResolvedValue(gotoTrajectory("/start"));
+
+  await discoverFlow(input(START_URL));
+
+  expect(pageGoto).not.toHaveBeenCalled();
+  expect(events).toEqual([
+    `allow:${START_URL}`,
+    `allow:${START_URL}`,
+    `allow:${START_URL}`,
     "validate",
   ]);
   expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
@@ -149,6 +168,7 @@ test("a different leading goto still opens the discovery start URL first", async
   expect(pageGoto).toHaveBeenCalledWith(START_URL, expect.any(Object));
   expect(events).toEqual([
     `allow:${START_URL}`,
+    `allow:${OTHER_URL}`,
     `allow:${START_URL}`,
     `goto:${START_URL}`,
     "validate",
@@ -157,6 +177,41 @@ test("a different leading goto still opens the discovery start URL first", async
     action: "goto",
     value: OTHER_URL,
   });
+});
+
+test("a relative compiled goto is allowlisted against the base URL", async () => {
+  vi.mocked(discover).mockResolvedValue(gotoTrajectory("/other"));
+
+  await discoverFlow(input(START_URL));
+
+  expect(events).toEqual([
+    `allow:${START_URL}`,
+    `allow:${OTHER_URL}`,
+    `allow:${START_URL}`,
+    `goto:${START_URL}`,
+    "validate",
+  ]);
+  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
+    action: "goto",
+    value: OTHER_URL,
+  });
+});
+
+test("an unallowlisted compiled goto never launches the replay browser", async () => {
+  vi.mocked(discover).mockResolvedValue(clickThenGoto("//evil.test/secret"));
+
+  const pending = discoverFlow(input(START_URL));
+
+  await expect(pending).rejects.toBeInstanceOf(QaError);
+  await expect(pending).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+  expect(discover).toHaveBeenCalledTimes(1);
+  expect(startBrowser).not.toHaveBeenCalled();
+  expect(pageGoto).not.toHaveBeenCalled();
+  expect(validateFlow).not.toHaveBeenCalled();
+  expect(events).toEqual([
+    `allow:${START_URL}`,
+    "allow:http://evil.test/secret",
+  ]);
 });
 
 test("a disallowed start URL never launches the replay browser", async () => {
@@ -224,6 +279,24 @@ function gotoTrajectory(url: string): DiscoveryTrajectory {
       urlBefore: url,
       urlAfter: url,
       arguments: [],
+    },
+  ]);
+}
+
+function clickThenGoto(url: string): DiscoveryTrajectory {
+  const click = clickTrajectory();
+  return trajectory([
+    ...click.actions,
+    {
+      index: 1,
+      kind: "goto",
+      method: "goto",
+      action: "Open the next page",
+      instruction: "Open the next page",
+      selector: "",
+      urlBefore: START_URL,
+      urlAfter: url,
+      arguments: { url },
     },
   ]);
 }

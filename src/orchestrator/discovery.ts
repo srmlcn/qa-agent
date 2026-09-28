@@ -119,6 +119,10 @@ async function replayDraft(
     });
   });
 
+  const baseUrl = input.config.application.baseUrl;
+  assertCompiledGotoUrls(flow, input.config);
+  const replayFlow = withAbsoluteGotos(flow, baseUrl);
+
   try {
     session = await startBrowser({
       browser: input.config.playwright.browser,
@@ -130,9 +134,9 @@ async function replayDraft(
       signal,
       ...(storageState === undefined ? {} : { storageState }),
     });
-    await openReplayStart(session.page, input, flow);
+    await openReplayStart(session.page, input, replayFlow);
     return await validateFlow({
-      flow,
+      flow: replayFlow,
       page: session.page,
       timeoutMs: input.config.playwright.timeoutMs,
     });
@@ -142,18 +146,33 @@ async function replayDraft(
 }
 
 /**
+ * Relative goto values resolve against `application.baseUrl`, matching
+ * execution. Each target must be allowlisted before replay can navigate.
+ */
+function assertCompiledGotoUrls(flow: FlowSpec, config: ProjectConfig): void {
+  const baseUrl = config.application.baseUrl;
+  for (const value of gotoValues(flow)) {
+    assertUrlAllowed(resolveAgainstBase(value, baseUrl), config);
+  }
+}
+
+/**
  * The discovery browser is already closed, so this page is `about:blank`.
  * `openStartUrl` is not a compiled step. Open the allowlisted start URL
- * before the compiled steps, unless the draft already begins with that `goto`.
+ * before the compiled steps, unless the draft already begins with an
+ * equivalent `goto`.
  */
 async function openReplayStart(
   page: BrowserSession["page"],
   input: DiscoverFlowInput,
   flow: FlowSpec,
 ): Promise<void> {
-  const startUrl = resolveStartUrl(input);
+  const startUrl = resolveAgainstBase(
+    resolveStartUrl(input),
+    input.config.application.baseUrl,
+  );
   assertUrlAllowed(startUrl, input.config);
-  if (startsWithStartGoto(flow, startUrl)) {
+  if (startsWithStartGoto(flow, startUrl, input.config.application.baseUrl)) {
     return;
   }
   await page.goto(startUrl, {
@@ -162,13 +181,93 @@ async function openReplayStart(
   });
 }
 
+function withAbsoluteGotos(flow: FlowSpec, baseUrl: string): FlowSpec {
+  const copy = structuredClone(flow);
+  for (const step of copy.steps) {
+    const value = gotoValue(step);
+    if (value !== undefined) {
+      writeGotoValue(step, resolveAgainstBase(value, baseUrl));
+    }
+  }
+  for (const assertion of copy.assertions) {
+    if (assertion.type !== "sequence") {
+      continue;
+    }
+    for (const entry of assertion.sequence) {
+      const value = gotoValue(entry);
+      if (value !== undefined) {
+        writeGotoValue(entry, resolveAgainstBase(value, baseUrl));
+      }
+    }
+  }
+  return copy;
+}
+
+function gotoValues(flow: FlowSpec): string[] {
+  const values: string[] = [];
+  for (const step of flow.steps) {
+    const value = gotoValue(step);
+    if (value !== undefined) {
+      values.push(value);
+    }
+  }
+  for (const assertion of flow.assertions) {
+    if (assertion.type !== "sequence") {
+      continue;
+    }
+    for (const entry of assertion.sequence) {
+      const value = gotoValue(entry);
+      if (value !== undefined) {
+        values.push(value);
+      }
+    }
+  }
+  return values;
+}
+
+function gotoValue(step: unknown): string | undefined {
+  if (!isGoto(step)) {
+    return undefined;
+  }
+  return step.value;
+}
+
+function writeGotoValue(step: unknown, value: string): void {
+  if (isGoto(step)) {
+    step.value = value;
+  }
+}
+
+function isGoto(step: unknown): step is { action: "goto"; value: string } {
+  if (typeof step !== "object" || step === null) {
+    return false;
+  }
+  const record = step as { action?: unknown; value?: unknown };
+  return record.action === "goto" && typeof record.value === "string";
+}
+
+function resolveAgainstBase(value: string, baseUrl: string): string {
+  try {
+    return new URL(value, baseUrl).href;
+  } catch {
+    return value;
+  }
+}
+
 function resolveStartUrl(input: DiscoverFlowInput): string {
   return input.startUrl ?? input.config.application.baseUrl;
 }
 
-function startsWithStartGoto(flow: FlowSpec, startUrl: string): boolean {
-  const first = flow.steps[0] as { action?: unknown; value?: unknown } | undefined;
-  return first?.action === "goto" && first.value === startUrl;
+function startsWithStartGoto(
+  flow: FlowSpec,
+  startUrl: string,
+  baseUrl: string,
+): boolean {
+  const value = gotoValue(flow.steps[0]);
+  if (value === undefined) {
+    return false;
+  }
+  return resolveAgainstBase(value, baseUrl) === resolveAgainstBase(startUrl, baseUrl);
 }
 
 function recordPassed(builder: RunBuilder, flow: FlowSpec): void {
