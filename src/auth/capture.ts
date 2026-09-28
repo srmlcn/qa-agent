@@ -17,7 +17,8 @@ export type CaptureProfileOptions = {
   profile: string;
   startUrl: string;
   /**
-   * Aborts launch, the wait, or the storage-state read and writes no profile.
+   * Aborts launch, navigation, the wait, or the storage-state read.
+   * An abort writes no profile and removes the operator ready file.
    */
   signal?: AbortSignal;
   /** When present, `startUrl` is checked with the host allowlist before launch. */
@@ -46,12 +47,12 @@ export async function captureProfile(
   // Reject a profile path that would escape the auth directory before launch.
   readyFile(options.projectId, options.profile);
 
-  const session = await startBrowser({
-    headless: false,
-    signal: options.signal,
-  });
-
+  let session: Awaited<ReturnType<typeof startBrowser>> | undefined;
   try {
+    session = await startBrowser({
+      headless: false,
+      signal: options.signal,
+    });
     if (options.signal?.aborted) {
       throw cancelled();
     }
@@ -64,11 +65,11 @@ export async function captureProfile(
     });
   } catch (error) {
     if (options.signal?.aborted) {
-      throw cancelled();
+      abortWithoutProfile(options.projectId, options.profile);
     }
     throw error;
   } finally {
-    await session.close();
+    await session?.close();
   }
 }
 

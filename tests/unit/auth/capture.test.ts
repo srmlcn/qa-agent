@@ -128,6 +128,60 @@ test("a rejected storageState after abort writes no profile", async () => {
   expect(authEntries("billing")).toEqual([]);
 });
 
+test("abort during launch removes the ready file", async () => {
+  const controller = new AbortController();
+  writeReady("billing", "admin");
+  startBrowser.mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        controller.abort();
+        reject(new Error("launch aborted"));
+      }),
+  );
+
+  const pending = capture("admin", controller.signal);
+
+  await expect(pending).rejects.toBeInstanceOf(QaError);
+  await expect(pending).rejects.toMatchObject({ code: "RUN_CANCELLED" });
+  expect(authEntries("billing")).toEqual([]);
+});
+
+test("abort during navigation removes the ready file", async () => {
+  const controller = new AbortController();
+  writeReady("billing", "admin");
+  const storageState = vi.fn(async () => savedState());
+  installSession({
+    goto: async () => {
+      controller.abort();
+      throw new Error("navigation aborted");
+    },
+    storageState,
+  });
+
+  await expect(capture("admin", controller.signal)).rejects.toMatchObject({
+    code: "RUN_CANCELLED",
+  });
+  expect(storageState).not.toHaveBeenCalled();
+  expect(authEntries("billing")).toEqual([]);
+});
+
+test("abort during the operator wait removes the ready file", async () => {
+  const controller = new AbortController();
+  const storageState = vi.fn(async () => savedState());
+  const waiting = readyWhenWaiting(controller.signal);
+  installSession({ storageState });
+
+  const pending = capture("admin", controller.signal);
+  await waiting;
+  writeReady("billing", "admin");
+  controller.abort();
+
+  await expect(pending).rejects.toBeInstanceOf(QaError);
+  await expect(pending).rejects.toMatchObject({ code: "RUN_CANCELLED" });
+  expect(storageState).not.toHaveBeenCalled();
+  expect(authEntries("billing")).toEqual([]);
+});
+
 test("a completed capture writes the profile", async () => {
   writeReady("billing", "admin");
   const close = installSession({
@@ -194,6 +248,20 @@ function contextWith(
   storageState: () => Promise<StorageState>,
 ): BrowserContext {
   return { storageState } as unknown as BrowserContext;
+}
+
+function readyWhenWaiting(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const original = signal.addEventListener.bind(signal);
+    vi.spyOn(signal, "addEventListener").mockImplementation(
+      (type, listener, options) => {
+        original(type, listener, options);
+        if (type === "abort") {
+          resolve();
+        }
+      },
+    );
+  });
 }
 
 function writeReady(projectId: string, profile: string): void {
