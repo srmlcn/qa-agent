@@ -16,7 +16,9 @@ export type CaptureProfileOptions = {
   projectId: string;
   profile: string;
   startUrl: string;
-  /** Aborts launch or the wait and writes no profile. */
+  /**
+   * Aborts launch, the wait, or the storage-state read and writes no profile.
+   */
   signal?: AbortSignal;
   /** When present, `startUrl` is checked with the host allowlist before launch. */
   config?: ProjectConfig;
@@ -55,12 +57,10 @@ export async function captureProfile(
     }
     await session.page.goto(options.startUrl, { signal: options.signal });
     await waitForOperator(options);
-    if (options.signal?.aborted) {
-      throw cancelled();
-    }
     return await finish(session.context, {
       projectId: options.projectId,
       profile: options.profile,
+      signal: options.signal,
     });
   } catch (error) {
     if (options.signal?.aborted) {
@@ -74,13 +74,20 @@ export async function captureProfile(
 
 /**
  * Saves `context.storageState()` and removes the operator ready file.
+ * An abort before, during, or after that read leaves no profile and no ready file.
  * Tests call this directly so capture does not need a human.
  */
 export async function finish(
   context: BrowserContext,
-  options: { projectId: string; profile: string },
+  options: { projectId: string; profile: string; signal?: AbortSignal },
 ): Promise<CapturedProfile> {
-  const storageState = await context.storageState();
+  if (options.signal?.aborted) {
+    abortWithoutProfile(options.projectId, options.profile);
+  }
+  const storageState = await readStorageState(context, options);
+  if (options.signal?.aborted) {
+    abortWithoutProfile(options.projectId, options.profile);
+  }
   saveProfile(options.projectId, options.profile, storageState);
   removeReadyFile(options.projectId, options.profile);
   logger.info(
@@ -180,6 +187,25 @@ function readyFile(projectId: string, profile: string): string {
 
 function removeReadyFile(projectId: string, profile: string): void {
   rmSync(readyFile(projectId, profile), { force: true });
+}
+
+async function readStorageState(
+  context: BrowserContext,
+  options: { projectId: string; profile: string; signal?: AbortSignal },
+): Promise<Awaited<ReturnType<BrowserContext["storageState"]>>> {
+  try {
+    return await context.storageState();
+  } catch (error) {
+    if (options.signal?.aborted) {
+      abortWithoutProfile(options.projectId, options.profile);
+    }
+    throw error;
+  }
+}
+
+function abortWithoutProfile(projectId: string, profile: string): never {
+  removeReadyFile(projectId, profile);
+  throw cancelled();
 }
 
 function chunkText(chunk: string | Uint8Array): string {
