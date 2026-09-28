@@ -93,6 +93,41 @@ test("redacts cookie assignments while keeping cookie names", () => {
   );
 });
 
+test("redacts cookies whose names match attribute names", () => {
+  const secret = "attribute-named-cookie-secret";
+
+  expect(redactCookies(`Cookie: Path=${secret}`)).toBe(
+    "Cookie: Path=[redacted]",
+  );
+  expect(
+    redactCookies(`Cookie: session=${secret}; Path=/admin; Domain=evil.test`),
+  ).toBe("Cookie: session=[redacted]; Path=[redacted]; Domain=[redacted]");
+  expect(redactCookies(`cookie: Expires=${secret}; Max-Age=${secret}`)).toBe(
+    "cookie: Expires=[redacted]; Max-Age=[redacted]",
+  );
+  expect(redactCookies(`Set-Cookie: Path=${secret}; Secure; HttpOnly`)).toBe(
+    "Set-Cookie: Path=[redacted]; Secure; HttpOnly",
+  );
+  expect(
+    redactCookies(
+      `Set-Cookie: session=${secret}; Path=/; Domain=example.com; HttpOnly`,
+    ),
+  ).toBe("Set-Cookie: session=[redacted]; Path=/; Domain=example.com; HttpOnly");
+  expect(redactCookies(`Path=${secret}; theme=dark`)).toBe(
+    "Path=[redacted]; theme=[redacted]",
+  );
+  expect(redactCookies(`session=${secret}; path=/`)).toBe(
+    "session=[redacted]; path=[redacted]",
+  );
+  expect(redactCookies(`document.cookie = "Path=${secret}; path=/"`)).toBe(
+    'document.cookie = "Path=[redacted]; path=/"',
+  );
+  expect(redactCookies(`Cookie: Path=${secret}`)).not.toContain(secret);
+  expect(redactCookies(`Set-Cookie: Secure=${secret}`)).toBe(
+    "Set-Cookie: Secure=[redacted]",
+  );
+});
+
 test("redacts sensitive JSON keys and leaves other fields", () => {
   const result = redactBody(
     '{"user":"ada","access_token":"tok","refresh_token":"ref","id_token":"id","apiKey":"key","api_key":"k","password":"pw","secret":"s","nested":{"password":"again"}}',
