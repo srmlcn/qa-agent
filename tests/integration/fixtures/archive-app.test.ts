@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { expect, test } from "vitest";
 import { startBrowser } from "../../../src/playwright/runtime.js";
@@ -126,13 +126,22 @@ test("listens on 127.0.0.1 and close() frees the port", async () => {
   const port = Number(new URL(app.url).port);
   try {
     expect(app.url).toBe(`http://127.0.0.1:${port}`);
-    expect(listenAddresses(port)).toEqual(["127.0.0.1"]);
+    assertProcListeners(port, ["127.0.0.1"]);
   } finally {
     await app.close();
   }
 
   await expect.poll(() => portIsFree(port), { timeout: 5_000 }).toBe(true);
-  expect(listenAddresses(port)).toEqual([]);
+  assertProcListeners(port, []);
+});
+
+test("proc listen probe is optional when the tables are absent", () => {
+  expect(
+    procListenAddresses(80, [
+      "/no/such/proc/net/tcp",
+      "/no/such/proc/net/tcp6",
+    ]),
+  ).toBeUndefined();
 });
 
 function portIsFree(port: number): Promise<boolean> {
@@ -149,11 +158,24 @@ function portIsFree(port: number): Promise<boolean> {
   });
 }
 
-function listenAddresses(port: number): string[] {
+const PROC_NET_TABLES = ["/proc/net/tcp", "/proc/net/tcp6"];
+
+/**
+ * Linux procfs listeners for `port`.
+ * Undefined when either table is missing; callers then keep the
+ * `server.address()` result already checked via `app.url`.
+ */
+function procListenAddresses(
+  port: number,
+  tables: readonly string[] = PROC_NET_TABLES,
+): string[] | undefined {
   const portHex = port.toString(16).padStart(4, "0");
   const addresses: string[] = [];
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
-    const table = readFileSync(file, "utf8");
+  for (const file of tables) {
+    const table = readProcTable(file);
+    if (table === undefined) {
+      return undefined;
+    }
     for (const line of table.split("\n")) {
       const columns = line.trim().split(/\s+/);
       const local = columns[1];
@@ -172,6 +194,34 @@ function listenAddresses(port: number): string[] {
     }
   }
   return addresses;
+}
+
+function assertProcListeners(port: number, expected: readonly string[]): void {
+  const addresses = procListenAddresses(port);
+  if (addresses === undefined) {
+    expect(procTablesAvailable()).toBe(false);
+    return;
+  }
+  expect(addresses).toEqual([...expected]);
+}
+
+function procTablesAvailable(): boolean {
+  return PROC_NET_TABLES.every((file) => existsSync(file));
+}
+
+function readProcTable(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (isEnoent(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function describeAddress(hex: string): string {
