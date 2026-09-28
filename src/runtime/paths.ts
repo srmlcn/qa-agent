@@ -1,4 +1,13 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
@@ -51,6 +60,8 @@ export function ensureHomeLayout(): void {
 
 function assertSafeProjectId(projectId: string): void {
   if (
+    projectId.length === 0 ||
+    projectId === "." ||
     projectId.includes("/") ||
     projectId.includes("\\") ||
     projectId.includes("..")
@@ -61,8 +72,64 @@ function assertSafeProjectId(projectId: string): void {
 
 function ensurePrivateDir(path: string): void {
   const resolved = assertUnderHome(path);
+  refuseSymlink(resolved);
   mkdirSync(resolved, { recursive: true, mode: PRIVATE_DIR_MODE });
-  chmodSync(resolved, PRIVATE_DIR_MODE);
+  const realHome = realpathSync(resolve(homeDir()));
+  const real = realpathSync(resolved);
+  if (real !== realHome && !real.startsWith(`${realHome}${sep}`)) {
+    throw new Error(`Refusing to create directory outside home: ${real}`);
+  }
+  chmodPrivateDir(resolved);
+}
+
+function chmodPrivateDir(path: string): void {
+  // fchmodSync is not implemented on Windows, and O_NOFOLLOW is not enforced there.
+  if (process.platform === "win32") {
+    chmodPrivateDirWindows(path);
+    return;
+  }
+  chmodPrivateDirPosix(path);
+}
+
+function chmodPrivateDirPosix(path: string): void {
+  const fd = openSync(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    fchmodSync(fd, PRIVATE_DIR_MODE);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function chmodPrivateDirWindows(path: string): void {
+  const realHome = realpathSync(resolve(homeDir()));
+  const real = realpathSync(path);
+  if (real !== realHome && !real.startsWith(`${realHome}${sep}`)) {
+    return;
+  }
+  if (lstatSync(path).isSymbolicLink()) {
+    return;
+  }
+  chmodSync(path, PRIVATE_DIR_MODE);
+}
+
+function refuseSymlink(path: string): void {
+  try {
+    if (lstatSync(path).isSymbolicLink()) {
+      throw new Error(`Refusing to follow a symlink: ${path}`);
+    }
+  } catch (error) {
+    if (isEnoent(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function assertUnderHome(path: string): string {

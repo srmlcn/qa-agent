@@ -83,8 +83,30 @@ function escapeCssIdentifier(value: string): string {
   return escaped;
 }
 
+/**
+ * CSSOM serialization of a double-quoted string body. NUL becomes U+FFFD.
+ * Other controls are hexadecimal escapes, so a newline, carriage return,
+ * or form feed cannot end or rewrite the attribute selector.
+ */
 function escapeCssString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  let escaped = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0) {
+      escaped += "\uFFFD";
+      continue;
+    }
+    if ((code >= 0x0001 && code <= 0x001f) || code === 0x007f) {
+      escaped += `\\${code.toString(16)} `;
+      continue;
+    }
+    if (code === 0x0022 || code === 0x005c) {
+      escaped += `\\${value.charAt(index)}`;
+      continue;
+    }
+    escaped += value.charAt(index);
+  }
+  return escaped;
 }
 
 function isDigit(code: number): boolean {

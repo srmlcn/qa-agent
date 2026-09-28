@@ -87,13 +87,14 @@ export function complete(runId: string, result: RunResult): void {
 }
 
 /**
- * Aborts the run signal with `RUN_CANCELLED`, sets status to `cancelled`, and
- * calls the registered close hook once. A second call does not throw and does
- * not call the hook again.
+ * Aborts a running run with `RUN_CANCELLED`, sets status to `cancelled`, and
+ * calls the registered close hook once. A run that is already `cancelled`,
+ * `passed`, `failed`, or `error` is left unchanged, so the signal stays as it
+ * is and the hook is not called again.
  */
 export function cancel(runId: string): void {
   const run = requireRun(runId);
-  if (run.status === "cancelled") {
+  if (run.status !== "running") {
     return;
   }
 

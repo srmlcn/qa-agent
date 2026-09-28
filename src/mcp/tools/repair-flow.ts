@@ -10,7 +10,6 @@ const schema = z.object({
   flowId: z.string().min(1),
   failedStepId: z.string().min(1).optional(),
   runId: z.string().min(1).optional(),
-  projectRoot: z.string().min(1).optional(),
 });
 
 export type RepairFlowOutput = {
@@ -31,7 +30,7 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<RepairFlowOutput> {
     const input = schema.parse(args);
-    const projectRoot = input.projectRoot ?? process.cwd();
+    const projectRoot = process.cwd();
     const config = loadProjectConfig(projectRoot);
     const provider = createProvider(config.llm);
     if (input.failedStepId === undefined || input.runId === undefined) {

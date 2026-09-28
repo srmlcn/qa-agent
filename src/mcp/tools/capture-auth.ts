@@ -7,7 +7,6 @@ const schema = z.object({
   projectId: z.string().min(1),
   profile: z.string().min(1),
   startUrl: z.string().min(1),
-  projectRoot: z.string().min(1).optional(),
 });
 
 /**
@@ -21,7 +20,7 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<CapturedProfile> {
     const input = schema.parse(args);
-    const projectRoot = input.projectRoot ?? process.cwd();
+    const projectRoot = process.cwd();
     return captureProfile({
       projectId: input.projectId,
       profile: input.profile,

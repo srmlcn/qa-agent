@@ -200,6 +200,123 @@ test("number and boolean inputs are inserted as literal text", () => {
   });
 });
 
+test("an empty id after substitution fails schema validation", () => {
+  const emptyStepId = parseFlowSpec({
+    version: 1,
+    id: "project.archive",
+    name: "Archive an active project",
+    objective: "Archive a project",
+    inputs: {
+      stepId: { type: "string", required: true },
+    },
+    steps: [
+      {
+        id: "${stepId}",
+        intent: "Open the page",
+        action: "goto",
+        value: "/archive",
+      },
+    ],
+    assertions: [],
+  });
+  const emptyAssertionId = parseFlowSpec({
+    version: 1,
+    id: "project.archive",
+    name: "Archive an active project",
+    objective: "Archive a project",
+    inputs: {
+      assertionId: { type: "string", required: true },
+    },
+    steps: [],
+    assertions: [
+      {
+        id: "${assertionId}",
+        type: "url",
+        url: "/archive",
+      },
+    ],
+  });
+
+  expectFlowValidation(() => interpolateFlow(emptyStepId, { stepId: "" }));
+  expectFlowValidation(() =>
+    interpolateFlow(emptyAssertionId, { assertionId: "" }),
+  );
+  expect(emptyStepId.steps[0]).toMatchObject({ id: "${stepId}" });
+  expect(emptyAssertionId.assertions[0]).toMatchObject({
+    id: "${assertionId}",
+  });
+});
+
+test("an empty nested sequence action id after substitution fails validation", () => {
+  const flow = parseFlowSpec({
+    version: 1,
+    id: "project.archive",
+    name: "Archive an active project",
+    objective: "Archive a project",
+    inputs: {
+      actionId: { type: "string", required: true },
+    },
+    steps: [],
+    assertions: [
+      {
+        id: "reload-then-check",
+        type: "sequence",
+        sequence: [
+          {
+            id: "${actionId}",
+            action: "reload",
+          },
+        ],
+      },
+    ],
+  });
+
+  expectFlowValidation(() => interpolateFlow(flow, { actionId: "" }));
+  expect(flow.assertions[0]).toMatchObject({
+    sequence: [{ id: "${actionId}", action: "reload" }],
+  });
+});
+
+test("a substituted id is returned only when it still satisfies the schema", () => {
+  const flow = parseFlowSpec({
+    version: 1,
+    id: "project.archive",
+    name: "Archive an active project",
+    objective: "Archive a project",
+    inputs: {
+      slug: { type: "string", required: true },
+    },
+    steps: [
+      {
+        id: "open-${slug}",
+        intent: "Open the page",
+        action: "goto",
+        value: "/${slug}",
+      },
+    ],
+    assertions: [
+      {
+        id: "saw-${slug}",
+        type: "url",
+        url: "/${slug}",
+      },
+    ],
+  });
+
+  const result = interpolateFlow(flow, { slug: "northwind" });
+
+  expect(result.steps[0]).toMatchObject({
+    id: "open-northwind",
+    value: "/northwind",
+  });
+  expect(result.assertions[0]).toMatchObject({
+    id: "saw-northwind",
+    url: "/northwind",
+  });
+  expect(result).toEqual(parseFlowSpec(result));
+  expect(flow.steps[0]).toMatchObject({ id: "open-${slug}" });
+});
+
 test("an optional input with no value fails only when referenced", () => {
   const referenced = clickFlow("Options for ${nickname}", {
     projectName: { type: "string", required: true },

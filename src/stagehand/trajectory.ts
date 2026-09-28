@@ -35,6 +35,9 @@ export interface DiscoveryAction {
   action?: string;
   selector?: string;
   method?: string;
+  role?: string;
+  accessibleName?: string;
+  "aria-label"?: string;
   urlBefore: string;
   urlAfter: string;
   arguments: unknown;
@@ -187,6 +190,9 @@ export function fromAgentResult(
     const action = actionText(entry);
     const method = methodText(entry);
     const instruction = instructionText(entry);
+    const role = text(entry.role);
+    const accessibleName = text(entry.accessibleName);
+    const ariaLabel = text(entry["aria-label"]);
     const screenshotPath = text(entry.screenshotPath);
     const urlBefore = urlText(entry) ?? "";
     const record: DiscoveryAction = {
@@ -206,6 +212,15 @@ export function fromAgentResult(
     }
     if (method) {
       record.method = method;
+    }
+    if (role) {
+      record.role = role;
+    }
+    if (accessibleName) {
+      record.accessibleName = accessibleName;
+    }
+    if (ariaLabel) {
+      record["aria-label"] = ariaLabel;
     }
     if (screenshotPath) {
       record.screenshotPath = screenshotPath;

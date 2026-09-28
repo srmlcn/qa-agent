@@ -213,6 +213,78 @@ test("attach keeps absolute paths in process and rejects traversal", () => {
   );
 });
 
+test("readRun refuses a result.json symlink that escapes the run directory", () => {
+  const runDir = createRunDir(projectRoot, RUN_ID);
+  const outside = join(scratch, "outside-result.json");
+  const marker = "outside-result-secret";
+  writeFileSync(
+    outside,
+    `${JSON.stringify(minimalResult(RUN_ID))}\n${marker}\n`,
+  );
+  symlinkSync(outside, join(runDir, "result.json"));
+
+  expect(() => readRun(projectRoot, RUN_ID)).toThrow(/Invalid artifact path/);
+  expect(readFileSync(outside, "utf8")).toContain(marker);
+  expect(existsSync(join(tempHome, "auth"))).toBe(false);
+});
+
+test("createRunDir refuses a symlink ancestor that lands in the auth home", () => {
+  const auth = join(tempHome, "auth");
+  mkdirSync(auth, { recursive: true });
+  symlinkSync(auth, join(projectRoot, ".autonomous-qa"));
+
+  expect(() => createRunDir(projectRoot, RUN_ID)).toThrow(
+    /Refusing to write auth files/,
+  );
+  expect(existsSync(join(auth, "artifacts", RUN_ID))).toBe(false);
+  expect(readdirSync(auth)).toEqual([]);
+
+  rmSync(join(projectRoot, ".autonomous-qa"));
+  const qa = join(projectRoot, ".autonomous-qa");
+  mkdirSync(qa);
+  symlinkSync(auth, join(qa, "artifacts"));
+
+  expect(() => createRunDir(projectRoot, RUN_ID)).toThrow(
+    /Refusing to write auth files/,
+  );
+  expect(existsSync(join(auth, RUN_ID))).toBe(false);
+  expect(readdirSync(auth)).toEqual([]);
+});
+
+test("artifact containment realpaths a symlinked parent when the leaf is missing", () => {
+  const runDir = createRunDir(projectRoot, RUN_ID);
+  const outsideDir = join(scratch, "outside-shots");
+  mkdirSync(outsideDir);
+  symlinkSync(outsideDir, join(runDir, "shots"));
+  const escaped = join(runDir, "shots", "checkpoint.png");
+  const result = minimalResult(RUN_ID);
+
+  expect(() => attach(result, { screenshots: [escaped] })).toThrow(
+    /Invalid artifact path/,
+  );
+  expect(result.artifacts.screenshots).toEqual([]);
+  expect(existsSync(join(outsideDir, "checkpoint.png"))).toBe(false);
+
+  const danglingTarget = join(scratch, "dangling-target.png");
+  symlinkSync(danglingTarget, join(runDir, "dangling.png"));
+  expect(() =>
+    writeRun(projectRoot, {
+      ...minimalResult(RUN_ID),
+      artifacts: { screenshots: ["dangling.png"] },
+    }),
+  ).toThrow(/Invalid artifact path/);
+  expect(existsSync(join(runDir, "result.json"))).toBe(false);
+  expect(existsSync(danglingTarget)).toBe(false);
+
+  const outsideResult = join(scratch, "outside-write.json");
+  writeFileSync(outsideResult, "original");
+  symlinkSync(outsideResult, join(runDir, "result.json"));
+  expect(() => writeRun(projectRoot, minimalResult(RUN_ID))).toThrow(
+    /Invalid artifact path/,
+  );
+  expect(readFileSync(outsideResult, "utf8")).toBe("original");
+});
+
 test("run id length and separator rules reject unsafe ids", () => {
   expect(() => createRunDir(projectRoot, "abc")).toThrow(/Invalid run id/);
   expect(() => createRunDir(projectRoot, "a".repeat(81))).toThrow(

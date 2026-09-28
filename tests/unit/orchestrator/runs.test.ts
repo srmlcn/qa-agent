@@ -97,6 +97,26 @@ test("a second cancel does not call onCancel again and does not throw", () => {
   expect(getRun(runId).status).toBe("cancelled");
 });
 
+test("cancel leaves a finished run unchanged and does not call the hook", () => {
+  for (const status of ["passed", "failed", "error"] as const) {
+    const onCancel = vi.fn();
+    const created = createRun(`flow-${status}`, { onCancel });
+    const result = runResult(created.runId, `flow-${status}`, status);
+    complete(created.runId, result);
+    setOnCancel(created.runId, onCancel);
+
+    expect(() => cancel(created.runId)).not.toThrow();
+    expect(() => cancel(created.runId)).not.toThrow();
+
+    const record = getRun(created.runId);
+    expect(record.status).toBe(status);
+    expect(record.result).toBe(result);
+    expect(created.signal.aborted).toBe(false);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(listActive()).not.toContain(created.runId);
+  }
+});
+
 test("complete after cancel leaves status cancelled", () => {
   const { runId } = createRun("archive-project");
   cancel(runId);

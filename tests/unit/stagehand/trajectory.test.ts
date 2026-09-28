@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { chooseLocator } from "../../../src/flows/rank.js";
 import { fromAgentResult } from "../../../src/stagehand/trajectory.js";
 
 const meta = {
@@ -97,6 +98,122 @@ test("success with zero concrete actions yields an empty action list", () => {
   expect(trajectory.success).toBe(true);
   expect(trajectory.actions).toHaveLength(0);
   expect(trajectory.note).toBe("The task looks complete.");
+});
+
+test("top-level role, accessibleName, and aria-label survive on the action", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "click",
+          method: "click",
+          action: "click save",
+          selector: "//button[1]",
+          role: " button ",
+          accessibleName: " Save draft ",
+          "aria-label": " Save ",
+        },
+      ],
+    },
+    meta,
+  );
+
+  const action = trajectory.actions[0];
+
+  expect(trajectory.actions).toHaveLength(1);
+  expect(action).toMatchObject({
+    role: "button",
+    accessibleName: "Save draft",
+    "aria-label": "Save",
+  });
+  expect(action && chooseLocator(action)).toEqual({
+    type: "role",
+    role: "button",
+    name: "Save draft",
+  });
+});
+
+test("role and accessible name that exist only as top-level hints rank as a role locator", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "click",
+          method: "click",
+          action: "click save",
+          role: "button",
+          accessibleName: "Save",
+        },
+      ],
+    },
+    meta,
+  );
+
+  const action = trajectory.actions[0];
+
+  expect(action?.selector).toBe("");
+  expect(action && chooseLocator(action)).toEqual({
+    type: "role",
+    role: "button",
+    name: "Save",
+  });
+});
+
+test("role and aria-label that exist only as top-level hints rank as a role locator", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "click",
+          method: "click",
+          action: "click close",
+          selector: "//button",
+          role: "button",
+          "aria-label": "Close",
+        },
+      ],
+    },
+    meta,
+  );
+
+  const action = trajectory.actions[0];
+
+  expect(action).toMatchObject({
+    role: "button",
+    "aria-label": "Close",
+  });
+  expect(action).not.toHaveProperty("accessibleName");
+  expect(action && chooseLocator(action)).toEqual({
+    type: "role",
+    role: "button",
+    name: "Close",
+  });
+});
+
+test("blank ARIA hints are omitted from the normalized action", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "click",
+          method: "click",
+          action: "click",
+          role: "  ",
+          accessibleName: "",
+          "aria-label": "   ",
+        },
+      ],
+    },
+    meta,
+  );
+
+  expect(trajectory.actions[0]).not.toHaveProperty("role");
+  expect(trajectory.actions[0]).not.toHaveProperty("accessibleName");
+  expect(trajectory.actions[0]).not.toHaveProperty("aria-label");
 });
 
 test("a message alone does not become an action", () => {

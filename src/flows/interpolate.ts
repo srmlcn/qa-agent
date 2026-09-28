@@ -17,7 +17,8 @@ const PLACEHOLDER_START = "${";
 /**
  * Replace `${name}` placeholders in step, locator, and assertion strings.
  * Substitution is literal text only: inserted values are not evaluated and
- * are not scanned for further placeholders.
+ * are not scanned for further placeholders. The substituted flow is parsed
+ * again before it is returned.
  */
 export function interpolateFlow(flow: FlowSpec, inputs: FlowInputs): FlowSpec {
   let validated: FlowSpec;
@@ -33,7 +34,11 @@ export function interpolateFlow(flow: FlowSpec, inputs: FlowInputs): FlowSpec {
     substitute(value, resolution, validated.id);
   copy.steps = mapStrings(copy.steps, replace);
   copy.assertions = mapStrings(copy.assertions, replace);
-  return copy;
+  try {
+    return parseFlowSpec(copy);
+  } catch (error) {
+    throw flowValidationFailed(error, validated.id);
+  }
 }
 
 function resolveInputs(flow: FlowSpec, inputs: FlowInputs): Resolution {

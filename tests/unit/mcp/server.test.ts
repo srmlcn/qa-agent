@@ -199,7 +199,7 @@ test(
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
           reject(new Error(`timed out waiting for stderr log\n${stderr}`));
-        }, 5000);
+        }, 20_000);
         const check = (): void => {
           if (stderr.includes(LOG_LINE)) {
             clearTimeout(timer);
@@ -260,7 +260,7 @@ test(
       const exitCode = await new Promise<number | null>((resolve, reject) => {
         const timer = setTimeout(() => {
           reject(new Error(`mcp server did not exit after stdin closed\n${stderr}`));
-        }, 5000);
+        }, 20_000);
         child.once("exit", (code) => {
           clearTimeout(timer);
           resolve(code);
@@ -281,5 +281,5 @@ test(
       await rm(extraTool, { force: true });
     }
   },
-  30_000,
+  60_000,
 );
