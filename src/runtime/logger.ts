@@ -2,7 +2,6 @@ import {
   chmodSync,
   closeSync,
   constants,
-  fchmodSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -27,11 +26,8 @@ export type LoggerOptions = {
 
 const PRIVATE_DIR_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
-const LOG_OPEN_FLAGS =
-  constants.O_WRONLY |
-  constants.O_APPEND |
-  constants.O_CREAT |
-  constants.O_NOFOLLOW;
+// O_NOFOLLOW is not enforced on Windows, so it is not part of this open.
+const LOG_OPEN_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT;
 
 export function createLogger(options: LoggerOptions = {}): Logger {
   const filePath =
@@ -85,40 +81,60 @@ function appendLogLine(filePath: string, line: string): void {
   const directory = dirname(filePath);
   mkdirSync(directory, { recursive: true, mode: PRIVATE_DIR_MODE });
   chmodSync(directory, PRIVATE_DIR_MODE);
-  const fd = openLogFile(filePath);
+  const fd = openRegularLogFile(filePath);
   try {
     writeSync(fd, line, null, "utf8");
-    fchmodSync(fd, PRIVATE_FILE_MODE);
   } finally {
     closeSync(fd);
   }
+  restrictRegularLogFile(filePath);
 }
 
-function openLogFile(filePath: string): number {
-  try {
-    return openSync(filePath, LOG_OPEN_FLAGS, PRIVATE_FILE_MODE);
-  } catch (error) {
-    if (!isErrno(error, "ELOOP") || !unlinkSymbolicLink(filePath)) {
-      throw error;
+function openRegularLogFile(filePath: string): number {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    removeSymbolicLink(filePath);
+    const fd = openSync(filePath, LOG_OPEN_FLAGS, PRIVATE_FILE_MODE);
+    if (isRegularFile(filePath)) {
+      return fd;
     }
+    // Windows can follow a symlink that appeared between lstat and open.
+    closeSync(fd);
   }
-  return openSync(filePath, LOG_OPEN_FLAGS, PRIVATE_FILE_MODE);
+  throw new Error(`Log path is not a regular file: ${filePath}`);
 }
 
-function unlinkSymbolicLink(filePath: string): boolean {
+function restrictRegularLogFile(filePath: string): void {
+  if (!isRegularFile(filePath)) {
+    throw new Error(`Log path is not a regular file: ${filePath}`);
+  }
+  chmodSync(filePath, PRIVATE_FILE_MODE);
+}
+
+function removeSymbolicLink(filePath: string): void {
+  let info;
   try {
-    const info = lstatSync(filePath);
-    if (!info.isSymbolicLink()) {
-      return false;
-    }
+    info = lstatSync(filePath);
   } catch (error) {
     if (isErrno(error, "ENOENT")) {
-      return true;
+      return;
     }
     throw error;
   }
-  unlinkSync(filePath);
-  return true;
+  if (info.isSymbolicLink()) {
+    unlinkSync(filePath);
+  }
+}
+
+function isRegularFile(filePath: string): boolean {
+  try {
+    const info = lstatSync(filePath);
+    return info.isFile() && !info.isSymbolicLink();
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function isErrno(error: unknown, code: string): boolean {

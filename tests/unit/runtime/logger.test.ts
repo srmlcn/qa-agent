@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  constants,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +15,23 @@ import { join, resolve, sep } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { createLogger } from "../../../src/runtime/logger.js";
 
+const fsOpen = vi.hoisted(() => {
+  return {
+    actualOpenSync: null as unknown as typeof import("node:fs").openSync,
+    openSync: null as unknown as typeof import("node:fs").openSync,
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  fsOpen.actualOpenSync = actual.openSync;
+  fsOpen.openSync = actual.openSync;
+  return {
+    ...actual,
+    openSync: (...args: Parameters<typeof actual.openSync>) => fsOpen.openSync(...args),
+  };
+});
+
 const homes: string[] = [];
 
 afterEach(() => {
@@ -21,6 +39,7 @@ afterEach(() => {
   for (const home of homes.splice(0)) {
     rmSync(home, { recursive: true, force: true });
   }
+  fsOpen.openSync = fsOpen.actualOpenSync;
   vi.restoreAllMocks();
 });
 
@@ -74,7 +93,7 @@ test("names that resolve to the logs directory are rejected when the logger is c
   }
 });
 
-test("a symlink log file is not followed and the write stays inside logs", () => {
+test("a symlink log file is replaced without relying on O_NOFOLLOW", () => {
   const home = mkdtempSync(join(tmpdir(), "autonomous-qa-logs-"));
   const outside = mkdtempSync(join(tmpdir(), "autonomous-qa-outside-"));
   homes.push(home, outside);
@@ -87,6 +106,12 @@ test("a symlink log file is not followed and the write stays inside logs", () =>
   chmodSync(outsideFile, 0o644);
   const linkPath = join(logs, "runtime.log");
   symlinkSync(outsideFile, linkPath);
+  // Open follows symlinks even if the caller passes O_NOFOLLOW, as on Windows.
+  fsOpen.openSync = (path, flags, mode) => {
+    const followed =
+      typeof flags === "number" ? flags & ~constants.O_NOFOLLOW : flags;
+    return fsOpen.actualOpenSync(path, followed, mode);
+  };
 
   const logger = createLogger({ fileName: "runtime.log" });
   logger.info("wrote evidence");
