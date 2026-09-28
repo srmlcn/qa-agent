@@ -48,4 +48,48 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
 ## Operator path
 
-Documented when the v0.1 commands exist.
+1. From a checkout, install dependencies and build the package:
+
+   ```sh
+   npm install
+   npm run build
+   ```
+
+   Until a publish issue exists, run the CLI with a local `npm link` or with `node dist/cli/main.js`.
+
+2. Create the project files with `autonomous-qa init` or `node dist/cli/main.js init`. Init writes `.autonomous-qa/config.yml` and `.autonomous-qa/flows/`. It appends `.gitignore` entries for `.autonomous-qa/artifacts/` and `.autonomous-qa/runtime/`. It does not ignore `.autonomous-qa/flows/` or `.autonomous-qa/config.yml`.
+
+3. Set `llm.provider`, `baseUrl`, and `apiKeyEnv` in `.autonomous-qa/config.yml`. `apiKeyEnv` is the name of an environment variable, such as `COMPANY_LLM_API_KEY`. The key value lives in the environment, not in the file.
+
+   ```yaml
+   llm:
+     provider: openai-compatible
+     baseUrl: https://llm.company.internal/v1
+     apiKeyEnv: COMPANY_LLM_API_KEY
+   ```
+
+4. Init prints this MCP server block:
+
+   ```json
+   {
+     "mcpServers": {
+       "autonomous-qa": {
+         "type": "stdio",
+         "command": "autonomous-qa",
+         "args": ["mcp"]
+       }
+     }
+   }
+   ```
+
+   `autonomous-qa init --install-mcp` writes that server into `.cursor/mcp.json`.
+
+5. Capture an auth profile with `autonomous-qa auth capture --project <project-id> --profile <profile> --url <start-url>`. The command is implemented in `src/cli/commands/auth.ts`. It writes the profile file to `<home>/auth/<project-id>/<profile>.json`. Home defaults to `~/.autonomous-qa` and can be overridden with `AUTONOMOUS_QA_HOME`.
+
+6. A Cursor session calls `qa.status`, `qa.discover_flow`, `qa.execute_flow`, `qa.execute_suite`, `qa.repair_flow`, `qa.get_run`, `qa.capture_auth`, `qa.list_flows`, and `qa.cancel_run`. Replay (`qa.execute_flow` and `qa.execute_suite`) does not call the LLM. `qa.ping` is a smoke tool and is not required.
+
+7. A locator failure is `RunResult.failure.category` equal to `locator`.
+
+8. `qa.repair_flow` repairs a stale flow only for that locator failure. Assertion failures are not repaired.
+
+9. `.autonomous-qa/flows` and `.autonomous-qa/config.yml` are committable. Auth profiles and `.autonomous-qa/artifacts` are not.
