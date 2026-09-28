@@ -129,6 +129,119 @@ test("abort throws RUN_CANCELLED and the close hook ran", async () => {
   expect(ran).toBe(1);
 });
 
+test("a close failure after a discovery error keeps that error", async () => {
+  const closeError = new Error("browser close failed");
+  let closed = 0;
+  const fake = createFakeClient([]);
+  const client = {
+    async run(goal: string) {
+      return fake.run(goal);
+    },
+    async close() {
+      closed += 1;
+      throw closeError;
+    },
+  };
+
+  const error = await rejected(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 5,
+      client,
+    }),
+  );
+
+  expect(error.code).toBe("DISCOVERY_FAILED");
+  expect(error.cause).toBe(closeError);
+  expect(closed).toBe(1);
+});
+
+test("a close failure after cancellation keeps RUN_CANCELLED", async () => {
+  const controller = new AbortController();
+  const closeError = new Error("browser close failed");
+  let closed = 0;
+  const fake = createFakeClient([oneAction]);
+  const client = {
+    async run(goal: string) {
+      controller.abort();
+      return fake.run(goal);
+    },
+    async close() {
+      closed += 1;
+      throw closeError;
+    },
+  };
+
+  const error = await rejected(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 5,
+      signal: controller.signal,
+      client,
+    }),
+  );
+
+  expect(error.code).toBe("RUN_CANCELLED");
+  expect(error.cause).toBe(closeError);
+  expect(closed).toBe(1);
+});
+
+test("a close failure with no earlier error still surfaces", async () => {
+  const closeError = new Error("browser close failed");
+  const fake = createFakeClient([oneAction]);
+  const client = {
+    async run(goal: string) {
+      return fake.run(goal);
+    },
+    async close() {
+      throw closeError;
+    },
+  };
+
+  await expect(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 1,
+      client,
+    }),
+  ).rejects.toBe(closeError);
+});
+
+test("a close failure after an undefined rejection keeps that rejection", async () => {
+  const closeError = new Error("browser close failed");
+  let closed = 0;
+  const client = {
+    run(): Promise<never> {
+      return Promise.reject(undefined);
+    },
+    async close() {
+      closed += 1;
+      throw closeError;
+    },
+  };
+
+  await expect(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 5,
+      client,
+    }),
+  ).rejects.toBeUndefined();
+  expect(closed).toBe(1);
+});
+
 test("a disallowed URL throws POLICY_BLOCKED before the client acts", async () => {
   let ran = 0;
   let closed = 0;
