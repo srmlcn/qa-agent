@@ -1,4 +1,13 @@
-import { chmodSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
@@ -70,8 +79,40 @@ function ensurePrivateDir(path: string): void {
   if (real !== realHome && !real.startsWith(`${realHome}${sep}`)) {
     throw new Error(`Refusing to create directory outside home: ${real}`);
   }
-  refuseSymlink(resolved);
-  chmodSync(resolved, PRIVATE_DIR_MODE);
+  chmodPrivateDir(resolved);
+}
+
+function chmodPrivateDir(path: string): void {
+  // fchmodSync is not implemented on Windows, and O_NOFOLLOW is not enforced there.
+  if (process.platform === "win32") {
+    chmodPrivateDirWindows(path);
+    return;
+  }
+  chmodPrivateDirPosix(path);
+}
+
+function chmodPrivateDirPosix(path: string): void {
+  const fd = openSync(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    fchmodSync(fd, PRIVATE_DIR_MODE);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function chmodPrivateDirWindows(path: string): void {
+  const realHome = realpathSync(resolve(homeDir()));
+  const real = realpathSync(path);
+  if (real !== realHome && !real.startsWith(`${realHome}${sep}`)) {
+    return;
+  }
+  if (lstatSync(path).isSymbolicLink()) {
+    return;
+  }
+  chmodSync(path, PRIVATE_DIR_MODE);
 }
 
 function refuseSymlink(path: string): void {

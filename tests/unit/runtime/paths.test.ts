@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdtempSync,
   readdirSync,
   rmSync,
@@ -88,13 +89,15 @@ test("rejects . and an empty project id", () => {
 
 test("does not chmod a layout directory through a symlink", () => {
   const outside = mkdtempSync(join(tmpdir(), "autonomous-qa-outside-"));
+  chmodSync(outside, 0o755);
   const before = statSync(outside).mode & 0o777;
   symlinkSync(outside, join(home, "logs"));
 
   expect(() => ensureHomeLayout()).toThrowError(
     new Error(`Refusing to follow a symlink: ${join(home, "logs")}`),
   );
-  expect(statSync(outside).mode & 0o777).toBe(before);
+  expect(before).toBe(0o755);
+  expect(statSync(outside).mode & 0o777).toBe(0o755);
 
   rmSync(outside, { recursive: true, force: true });
 });
