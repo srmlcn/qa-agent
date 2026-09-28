@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { QaError } from "../../../src/errors/qa-error.js";
 import { compile } from "../../../src/flows/compiler.js";
-import { parseFlowSpec } from "../../../src/flows/schema.js";
+import { parseFlowSpec, type Locator } from "../../../src/flows/schema.js";
 import type {
   DiscoveryAction,
   DiscoveryTrajectory,
@@ -298,6 +298,48 @@ test("copies intent into semanticFallback when the action has no instruction", (
   expect(flow.steps[0]?.semanticFallback).toBe(flow.steps[0]?.intent);
 });
 
+test("intent uses the label, placeholder, text, test id, or attribute value", () => {
+  const flow = compile(
+    trajectory([
+      { method: "click", selector: "label=Email" },
+      {
+        method: "fill",
+        selector: "placeholder=Search projects",
+        arguments: ["atlas"],
+      },
+      { method: "click", selector: "text=Archive project" },
+      { method: "click", selector: "testid=save-button" },
+      { method: "click", selector: '[data-qa="archive"]' },
+    ]),
+    options,
+  );
+
+  expect(flow.steps.map((step) => step.intent)).toEqual([
+    "Click Email",
+    "Fill Search projects",
+    "Click Archive project",
+    "Click save-button",
+    "Click archive",
+  ]);
+  expect(flow.steps.map((step) => step.semanticFallback)).toEqual(
+    flow.steps.map((step) => step.intent),
+  );
+  expect(flow.steps.map((step) => step.id)).toEqual([
+    "click-email",
+    "fill-search-projects",
+    "click-archive-project",
+    "click-save-button",
+    "click-archive",
+  ]);
+  expect(flow.steps.map((step) => step.locator)).toEqual([
+    { type: "label", name: "Email" },
+    { type: "placeholder", value: "Search projects" },
+    { type: "text", text: "Archive project" },
+    { type: "testid", name: "save-button" },
+    { type: "attr", name: "data-qa", value: "archive" },
+  ]);
+});
+
 test("builds a short intent from the method and target", () => {
   const flow = compile(
     trajectory([
@@ -362,6 +404,44 @@ test("keeps xpath only when role and css are absent", () => {
       selector: "//button[@aria-label='Options']",
     },
   });
+});
+
+const acceptedLocatorKinds = {
+  role: "role",
+  label: "label",
+  placeholder: "placeholder",
+  text: "text",
+  testid: "testid",
+  attr: "attr",
+  css: "css",
+  xpath: "xpath",
+} as const satisfies Record<Locator["type"], string>;
+
+test("a missing locator names every kind the compiler accepts", () => {
+  const error = compileError(() =>
+    compile(
+      trajectory([
+        {
+          method: "click",
+          arguments: { coordinates: [180, 420] },
+        },
+      ]),
+      options,
+    ),
+  );
+
+  const kinds = Object.keys(acceptedLocatorKinds);
+  const last = kinds[kinds.length - 1];
+  const listed = `${kinds.slice(0, -1).join(", ")}, or ${last}`;
+
+  expect(error.code).toBe("FLOW_COMPILE_FAILED");
+  expect(error.stepId).toBe("click-the-target");
+  expect(error.message).toBe(
+    `Action at index 0 has no ${listed} locator.`,
+  );
+  for (const kind of kinds) {
+    expect(error.message).toContain(kind);
+  }
 });
 
 test("a click with an empty selector throws FLOW_COMPILE_FAILED", () => {
