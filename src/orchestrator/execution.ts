@@ -262,7 +262,10 @@ async function runSteps(
       await runAssertion(session.page, assertion, timeoutMs);
       builder.stepPassed(stepId);
     } catch (error) {
-      const qaError = asQaError(error, stepId, runId, flow.id);
+      // Cancel closes the page while the assertion is still running.
+      const qaError = signal.aborted
+        ? cancelledStep(signal, stepId, runId, flow.id)
+        : asQaError(error, stepId, runId, flow.id);
       builder.stepFailed(stepId, qaError);
       if (qaError.code === "LOCATOR_STALE") {
         locatorFailed = true;

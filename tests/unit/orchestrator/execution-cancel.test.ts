@@ -11,13 +11,18 @@ import { cancel, getRun, listActive } from "../../../src/orchestrator/runs.js";
 
 const CLOSED_TARGET = "page.click: Target page, context or browser has been closed";
 
-const { runAction, failedSteps } = vi.hoisted(() => ({
+const { runAction, runAssertion, failedSteps } = vi.hoisted(() => ({
   runAction: vi.fn<(page: unknown, step: unknown, timeoutMs: number) => Promise<void>>(),
+  runAssertion: vi.fn<(page: unknown, assertion: unknown, timeoutMs: number) => Promise<void>>(),
   failedSteps: [] as { stepId: string; code: string }[],
 }));
 
 vi.mock("../../../src/playwright/actions.js", () => ({
   runAction,
+}));
+
+vi.mock("../../../src/playwright/assertions.js", () => ({
+  runAssertion,
 }));
 
 vi.mock("../../../src/playwright/runtime.js", () => ({
@@ -74,9 +79,10 @@ const scratchDirs: string[] = [];
 afterEach(() => {
   failedSteps.length = 0;
   runAction.mockReset();
+  runAssertion.mockReset();
   for (const runId of listActive()) {
     const flowId = getRun(runId).flowId;
-    if (flowId === "page.cancel" || flowId === "page.error") {
+    if (flowId === "page.cancel" || flowId === "page.error" || flowId === "assert.cancel") {
       cancel(runId);
     }
   }
@@ -109,6 +115,34 @@ test("a step interrupted by cancel is recorded as RUN_CANCELLED", async () => {
   ]);
   expect(executed.result.failure).toMatchObject({
     stepId: "click-save",
+    message: "run cancelled",
+  });
+});
+
+test("an assertion interrupted by cancel is recorded as RUN_CANCELLED", async () => {
+  runAssertion.mockImplementation(async () => {
+    abortFlow("assert.cancel");
+    throw new QaError({
+      code: "BROWSER_CRASHED",
+      message: CLOSED_TARGET,
+      flowId: "assert.cancel",
+      stepId: "url-home",
+    });
+  });
+
+  const executed = await executeSaved(urlFlow("assert.cancel"));
+
+  expect(failedSteps).toEqual([{ stepId: "url-home", code: "RUN_CANCELLED" }]);
+  expect(executed.result.status).toBe("error");
+  expect(executed.result.steps).toEqual([
+    expect.objectContaining({
+      stepId: "url-home",
+      status: "error",
+      error: "run cancelled",
+    }),
+  ]);
+  expect(executed.result.failure).toMatchObject({
+    stepId: "url-home",
     message: "run cancelled",
   });
 });
@@ -153,6 +187,19 @@ async function executeSaved(flow: FlowSpec) {
     inputs: {},
     projectRoot,
     config: projectConfig(),
+  });
+}
+
+function urlFlow(id: string): FlowSpec {
+  return parseFlowSpec({
+    version: 1,
+    id,
+    name: "Check the url",
+    objective: "Record the assertion outcome.",
+    state: "validated",
+    inputs: {},
+    steps: [],
+    assertions: [{ id: "url-home", type: "url", url: "http://127.0.0.1/" }],
   });
 }
 
