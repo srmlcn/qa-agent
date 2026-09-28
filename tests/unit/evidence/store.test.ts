@@ -213,6 +213,49 @@ test("attach keeps absolute paths in process and rejects traversal", () => {
   );
 });
 
+test("an oversized response keeps bodyOmitted through write and read", () => {
+  const result = minimalResult(RUN_ID);
+  result.network.responses.push({
+    method: "GET",
+    url: "https://app.example/oversized",
+    status: 200,
+    timing: 5,
+    headers: { "content-type": "text/plain" },
+    bodyOmitted: true,
+  });
+
+  writeRun(projectRoot, result);
+
+  const stored = readRun(projectRoot, RUN_ID);
+  const response = stored.network.responses[0];
+  expect(response?.body).toBeUndefined();
+  expect(Object.hasOwn(response ?? {}, "body")).toBe(false);
+  expect(response?.bodyOmitted).toBe(true);
+  expect(JSON.stringify(stored)).not.toContain("oversized-body-secret");
+});
+
+test("readRun rejects a bodyOmitted value other than true", () => {
+  const runDir = createRunDir(projectRoot, RUN_ID);
+  writeRun(projectRoot, minimalResult(RUN_ID));
+  const filePath = join(runDir, "result.json");
+  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as {
+    network: { responses: Array<Record<string, unknown>> };
+  };
+  parsed.network.responses.push({
+    method: "GET",
+    url: "https://app.example/oversized",
+    status: 200,
+    timing: 1,
+    headers: {},
+    bodyOmitted: false,
+  });
+  writeFileSync(filePath, `${JSON.stringify(parsed, null, 2)}\n`);
+
+  expect(() => readRun(projectRoot, RUN_ID)).toThrow(
+    /Invalid run result field: network\.responses\.0\.bodyOmitted/,
+  );
+});
+
 test("readRun refuses a result.json symlink that escapes the run directory", () => {
   const runDir = createRunDir(projectRoot, RUN_ID);
   const outside = join(scratch, "outside-result.json");
@@ -249,6 +292,16 @@ test("createRunDir refuses a symlink ancestor that lands in the auth home", () =
   );
   expect(existsSync(join(auth, RUN_ID))).toBe(false);
   expect(readdirSync(auth)).toEqual([]);
+});
+
+test("createRunDir refuses a symlink ancestor that escapes the project root", () => {
+  const outside = join(scratch, "outside-artifacts");
+  mkdirSync(outside, { recursive: true });
+  symlinkSync(outside, join(projectRoot, ".autonomous-qa"));
+
+  expect(() => createRunDir(projectRoot, RUN_ID)).toThrow(/Invalid artifact path/);
+  expect(existsSync(join(outside, "artifacts", RUN_ID))).toBe(false);
+  expect(readdirSync(outside)).toEqual([]);
 });
 
 test("artifact containment realpaths a symlinked parent when the leaf is missing", () => {

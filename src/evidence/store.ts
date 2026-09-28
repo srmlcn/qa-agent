@@ -126,6 +126,7 @@ function resolveRunDir(projectRoot: string, runId: string): string {
     throw new Error(`Invalid run id: ${runId}`);
   }
   assertNotUnderAuth(runDir);
+  assertRealContained(root, runDir);
   return runDir;
 }
 
@@ -420,6 +421,9 @@ function redactNetwork(record: NetworkRecord): NetworkRecord {
   if (record.body !== undefined) {
     redacted.body = redactText(record.body);
   }
+  if (record.bodyOmitted === true) {
+    redacted.bodyOmitted = true;
+  }
   return redacted;
 }
 
@@ -590,6 +594,12 @@ function parseNetwork(value: unknown, field: string): NetworkRecord {
   };
   if (value.body !== undefined) {
     record.body = expectString(value.body, `${field}.body`);
+  }
+  if (value.bodyOmitted !== undefined) {
+    if (value.bodyOmitted !== true) {
+      throw new Error(`Invalid run result field: ${field}.bodyOmitted`);
+    }
+    record.bodyOmitted = true;
   }
   return record;
 }

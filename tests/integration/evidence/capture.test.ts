@@ -6,7 +6,7 @@ import {
   startBrowser,
   type BrowserSession,
 } from "../../../src/playwright/runtime.js";
-import type { Page } from "playwright";
+import type { Page, Response } from "playwright";
 
 const LAUNCH_TIMEOUT_MS = 30_000;
 const TEST_TIMEOUT_MS = 60_000;
@@ -16,6 +16,7 @@ const FAIL_URL = `${HOST}/fail`;
 const SECURE_URL = `${HOST}/secure`;
 const COOKIE_URL = `${HOST}/cookie`;
 const BIG_URL = `${HOST}/big`;
+const UNDERSTATED_URL = `${HOST}/understated`;
 const BINARY_URL = `${HOST}/binary`;
 const SMALL_URL = `${HOST}/small`;
 const AUTH_SECRET = "Bearer auth-header-secret-9f3a";
@@ -246,6 +247,75 @@ test(
         const serialized = JSON.stringify(session.capture);
         expect(serialized).not.toContain(OVERSIZED_SECRET);
         expect(serialized).not.toContain(BINARY_SECRET);
+      } finally {
+        await session.stop();
+      }
+    });
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "an understated content-length over the cap never reads the body",
+  async () => {
+    const cap = 64;
+    let bodyReads = 0;
+    await withPage(async (page) => {
+      page.on("response", (response) => {
+        if (response.url() !== UNDERSTATED_URL) {
+          return;
+        }
+        const read = response.body.bind(response);
+        (response as Response & { body: () => ReturnType<Response["body"]> }).body =
+          () => {
+            bodyReads += 1;
+            return read();
+          };
+      });
+      const session = await startCapture(page, evidenceOptions(cap));
+      try {
+        await page.route(UNDERSTATED_URL, (route) =>
+          route.fulfill({
+            status: 200,
+            contentType: "text/plain",
+            headers: { "content-length": "8" },
+            body: `${OVERSIZED_SECRET}${"y".repeat(cap)}`,
+          }),
+        );
+        await page.route(SMALL_URL, (route) =>
+          route.fulfill({
+            status: 200,
+            contentType: "text/plain",
+            body: "hello-body",
+          }),
+        );
+        await page.setContent("<!doctype html><title>capture</title>");
+        await page.evaluate(
+          async (urls) => {
+            await fetch(urls.understated);
+            await fetch(urls.small);
+          },
+          { understated: UNDERSTATED_URL, small: SMALL_URL },
+        );
+
+        await expect
+          .poll(() => responseFor(session, SMALL_URL)?.body, {
+            timeout: POLL_TIMEOUT_MS,
+          })
+          .toBe("hello-body");
+        await expect
+          .poll(() => responseFor(session, UNDERSTATED_URL)?.bodyOmitted, {
+            timeout: POLL_TIMEOUT_MS,
+          })
+          .toBe(true);
+        await session.stop();
+
+        const understated = responseFor(session, UNDERSTATED_URL);
+        expect(understated?.status).toBe(200);
+        expect(understated?.body).toBeUndefined();
+        expect(understated?.bodyOmitted).toBe(true);
+        expect(bodyReads).toBe(0);
+        expect(JSON.stringify(session.capture)).not.toContain(OVERSIZED_SECRET);
       } finally {
         await session.stop();
       }
