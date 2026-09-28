@@ -35,7 +35,11 @@ function isDirectRun(): boolean {
     return false;
   }
 
-  return import.meta.url === pathToFileURL(realpathSync(resolve(entry))).href;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(resolve(entry))).href;
+  } catch {
+    return false;
+  }
 }
 
 if (isDirectRun()) {
