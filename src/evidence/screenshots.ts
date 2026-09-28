@@ -1,6 +1,6 @@
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Page } from "playwright";
 import { QaError } from "../errors/qa-error.js";
 import type { FlowSpec } from "../flows/schema.js";
@@ -56,12 +56,167 @@ function assertStepFileName(stepId: string): void {
 export function assertArtifactPath(filePath: string): string {
   const resolved = resolve(filePath);
   if (containsCookieJar(resolved)) {
-    throw new QaError({
-      code: "POLICY_BLOCKED",
-      message: "Refusing an artifact path that contains the cookie jar",
-    });
+    throw artifactBlocked(
+      "Refusing an artifact path that contains the cookie jar",
+    );
   }
+  assertRealArtifactLocation(resolved);
   return resolved;
+}
+
+/**
+ * `resolve` does not follow a symlink. The nearest existing ancestor is
+ * realpathed so the write stays outside the auth home and inside the artifact
+ * directory. A symlink at the destination itself is refused.
+ */
+function assertRealArtifactLocation(resolved: string): void {
+  if (isSymbolicLink(resolved)) {
+    throw artifactBlocked("Refusing a symlinked artifact path");
+  }
+
+  const ancestor = nearestExistingAncestor(resolved);
+  const realAncestor = realPathOf(ancestor);
+  const realDestination = joinReal(ancestor, realAncestor, resolved);
+  const intended = intendedArtifactDirectory(resolved, ancestor);
+
+  if (
+    !isInside(intended, realAncestor) ||
+    !isInside(intended, realDestination)
+  ) {
+    throw artifactBlocked(
+      "Refusing an artifact path outside the artifact directory",
+    );
+  }
+  if (
+    containsCookieJar(realAncestor) ||
+    containsCookieJar(realDestination) ||
+    isUnderRealAuth(realAncestor) ||
+    isUnderRealAuth(realDestination)
+  ) {
+    throw artifactBlocked(
+      "Refusing an artifact path that contains the cookie jar",
+    );
+  }
+}
+
+function intendedArtifactDirectory(resolved: string, ancestor: string): string {
+  const directory = dirname(resolved);
+  if (pathExists(directory)) {
+    return directory;
+  }
+  return ancestor;
+}
+
+function nearestExistingAncestor(filePath: string): string {
+  let current = filePath;
+  while (!pathExists(current)) {
+    const parent = dirname(current);
+    if (parent === current) {
+      return current;
+    }
+    current = parent;
+  }
+  return current;
+}
+
+function joinReal(
+  ancestor: string,
+  realAncestor: string,
+  resolved: string,
+): string {
+  const suffix = relative(ancestor, resolved);
+  if (suffixEscapes(suffix)) {
+    throw artifactBlocked(
+      "Refusing an artifact path outside the artifact directory",
+    );
+  }
+  if (suffix.length === 0) {
+    return realAncestor;
+  }
+  return resolve(realAncestor, suffix);
+}
+
+function suffixEscapes(suffix: string): boolean {
+  return (
+    suffix.startsWith("..") ||
+    suffix.split(sep).includes("..") ||
+    suffix.startsWith(sep)
+  );
+}
+
+function realPathOf(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch (error) {
+    if (isEnoent(error)) {
+      throw artifactBlocked(
+        "Refusing an artifact path outside the artifact directory",
+      );
+    }
+    throw error;
+  }
+}
+
+function isSymbolicLink(filePath: string): boolean {
+  try {
+    return lstatSync(filePath).isSymbolicLink();
+  } catch (error) {
+    if (isEnoent(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function pathExists(filePath: string): boolean {
+  try {
+    lstatSync(filePath);
+    return true;
+  } catch (error) {
+    if (isEnoent(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isInside(parent: string, child: string): boolean {
+  const root = resolve(parent);
+  const target = resolve(child);
+  return target === root || target.startsWith(`${root}${sep}`);
+}
+
+function isUnderRealAuth(filePath: string): boolean {
+  const resolved = resolve(filePath);
+  for (const root of authRoots()) {
+    if (!pathExists(root)) {
+      continue;
+    }
+    let realRoot: string;
+    try {
+      realRoot = realpathSync(root);
+    } catch (error) {
+      if (isEnoent(error)) {
+        continue;
+      }
+      throw error;
+    }
+    if (isInside(realRoot, resolved)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function artifactBlocked(message: string): QaError {
+  return new QaError({
+    code: "POLICY_BLOCKED",
+    message,
+  });
+}
+
+function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function containsCookieJar(filePath: string): boolean {
