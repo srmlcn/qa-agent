@@ -9,7 +9,7 @@ import { tool as cancelRunTool } from "../../../src/mcp/tools/cancel-run.js";
 import { tool as captureAuthTool } from "../../../src/mcp/tools/capture-auth.js";
 import { tool as repairFlowTool } from "../../../src/mcp/tools/repair-flow.js";
 import { repairFlow } from "../../../src/orchestrator/repair.js";
-import { cancel } from "../../../src/orchestrator/runs.js";
+import { cancel, getRun } from "../../../src/orchestrator/runs.js";
 import * as browserRuntime from "../../../src/playwright/runtime.js";
 
 vi.mock("../../../src/orchestrator/repair.js", () => ({
@@ -18,6 +18,7 @@ vi.mock("../../../src/orchestrator/repair.js", () => ({
 
 vi.mock("../../../src/orchestrator/runs.js", () => ({
   cancel: vi.fn(),
+  getRun: vi.fn(),
 }));
 
 vi.mock("../../../src/auth/capture.js", () => ({
@@ -29,6 +30,13 @@ const roots: string[] = [];
 beforeEach(() => {
   vi.mocked(repairFlow).mockReset();
   vi.mocked(cancel).mockReset();
+  vi.mocked(getRun).mockReset();
+  vi.mocked(getRun).mockReturnValue({
+    runId: "run-1",
+    flowId: "archive-project",
+    status: "cancelled",
+    signal: new AbortController().signal,
+  });
   vi.mocked(captureProfile).mockReset();
   vi.spyOn(browserRuntime, "startBrowser").mockRejectedValue(
     new Error("control tool tests must not launch a browser"),
