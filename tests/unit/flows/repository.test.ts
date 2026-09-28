@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,6 +67,49 @@ test("save then list then read returns the same steps", () => {
   expect(existsSync(join(tempHome, "auth"))).toBe(false);
   expect(existsSync(join(homedir(), ".autonomous-qa", "auth", "project--archive.yml"))).toBe(
     false,
+  );
+});
+
+test("dotted and hyphenated flow ids round-trip in distinct files", () => {
+  const dotted = sampleFlow({ id: "a.b.c", name: "Dotted id" });
+  const hyphenated = sampleFlow({ id: "a.b--c", name: "Hyphenated id" });
+  save(projectRoot, dotted);
+  save(projectRoot, hyphenated);
+
+  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  expect(readdirSync(flowsDir).sort()).toEqual(["a--b--c.yml", "a--b__c.yml"]);
+  expect(readFileSync(join(flowsDir, "a--b--c.yml"), "utf8")).toBe(
+    stringifyFlow(dotted, "yaml"),
+  );
+  expect(readFileSync(join(flowsDir, "a--b__c.yml"), "utf8")).toBe(
+    stringifyFlow(hyphenated, "yaml"),
+  );
+  expect(read(projectRoot, dotted.id)).toEqual(dotted);
+  expect(read(projectRoot, hyphenated.id)).toEqual(hyphenated);
+  expect(list(projectRoot).map((item) => item.id).sort()).toEqual([
+    "a.b--c",
+    "a.b.c",
+  ]);
+});
+
+test("a legacy hyphenated filename is listed, read, and rewritten on save", () => {
+  const flow = sampleFlow({ id: "a.b-c", name: "Legacy hyphen" });
+  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  mkdirSync(flowsDir, { recursive: true });
+  const legacyPath = join(flowsDir, "a--b-c.yml");
+  writeFileSync(legacyPath, stringifyFlow(flow, "yaml"));
+
+  expect(read(projectRoot, flow.id)).toEqual(flow);
+  expect(list(projectRoot).map((item) => item.id)).toEqual(["a.b-c"]);
+
+  const updated = sampleFlow({ id: "a.b-c", name: "Rewritten hyphen" });
+  save(projectRoot, updated);
+
+  expect(existsSync(legacyPath)).toBe(false);
+  expect(readdirSync(flowsDir)).toEqual(["a--b_c.yml"]);
+  expect(read(projectRoot, flow.id)).toEqual(updated);
+  expect(readFileSync(join(flowsDir, "a--b_c.yml"), "utf8")).toBe(
+    stringifyFlow(updated, "yaml"),
   );
 });
 
