@@ -11,8 +11,12 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 const cliEntry = join(root, "dist", "cli", "main.js");
 
 beforeAll(async () => {
-  await execFileAsync("npm", ["run", "build"], { cwd: root });
-});
+  await execFileAsync(
+    process.execPath,
+    [join(root, "node_modules", "typescript", "lib", "tsc.js"), "-p", join(root, "tsconfig.json")],
+    { cwd: root },
+  );
+}, 60_000);
 
 test("a direct run through a symlink to dist/cli/main.js executes main", async () => {
   const directory = await mkdtemp(join(tmpdir(), "qa-cli-symlink-"));
