@@ -58,14 +58,15 @@ test("a successful mocked discovery returns runId and a flow id", async () => {
     result,
   });
 
-  const output = await tool.handler({
-    objective: "Save the page",
-    startUrl: "http://127.0.0.1:9/save",
-    authProfile: "owner",
-    constraints: ["Do not delete records", "Stay on the save page"],
-    maxSteps: 4,
-    projectRoot,
-  });
+  const output = await withCwd(projectRoot, () =>
+    tool.handler({
+      objective: "Save the page",
+      startUrl: "http://127.0.0.1:9/save",
+      authProfile: "owner",
+      constraints: ["Do not delete records", "Stay on the save page"],
+      maxSteps: 4,
+    }),
+  );
 
   expect(output.runId).toBe(result.runId);
   expect(output.flow.id).toBe(flow.id);
@@ -100,7 +101,9 @@ test("a QaError from discoverFlow is thrown unchanged", async () => {
   });
   vi.mocked(discoverFlow).mockRejectedValue(error);
 
-  await expect(tool.handler({ objective: "Save the page", projectRoot })).rejects.toBe(error);
+  await withCwd(projectRoot, () =>
+    expect(tool.handler({ objective: "Save the page" })).rejects.toBe(error),
+  );
   expect(vi.mocked(discoverFlow).mock.calls[0]?.[0]?.objective).toBe("Save the page");
 });
 
@@ -113,6 +116,16 @@ test("the handler imports the orchestrator and not the stagehand package", () =>
   expect(source).toContain('from "../../stagehand/provider.js"');
   expect(source).not.toContain(".strict()");
 });
+
+async function withCwd<T>(directory: string, run: () => Promise<T>): Promise<T> {
+  const previous = process.cwd();
+  process.chdir(directory);
+  try {
+    return await run();
+  } finally {
+    process.chdir(previous);
+  }
+}
 
 function createProjectRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "qa-discover-flow-"));

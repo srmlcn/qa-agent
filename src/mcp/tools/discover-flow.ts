@@ -12,7 +12,6 @@ const schema = z.object({
   authProfile: z.string().min(1).optional(),
   constraints: z.array(z.string().min(1)).optional(),
   maxSteps: z.number().int().positive().optional(),
-  projectRoot: z.string().min(1).optional(),
 });
 
 export type DiscoverFlowOutput = {
@@ -33,7 +32,7 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<DiscoverFlowOutput> {
     const input = schema.parse(args);
-    const projectRoot = input.projectRoot ?? process.cwd();
+    const projectRoot = process.cwd();
     const config = loadProjectConfig(projectRoot);
     const provider = createProvider(config.llm);
     const discovered = await discoverFlow({

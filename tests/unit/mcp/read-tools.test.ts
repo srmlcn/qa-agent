@@ -68,7 +68,7 @@ test("qa.list_flows returns one metadata object and no steps", async () => {
   const projectRoot = createProjectRoot();
   save(projectRoot, sampleFlow());
 
-  const listed = await callJson("qa.list_flows", { projectRoot });
+  const listed = await withCwd(projectRoot, () => callJson("qa.list_flows", {}));
   expect(listed).toEqual([
     {
       id: "project.archive",
@@ -138,7 +138,7 @@ test("qa.status does not include a fixture API key from the environment", async 
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
 
   try {
-    const ready = await callJson("qa.status", { projectRoot });
+    const ready = await withCwd(projectRoot, () => callJson("qa.status", {}));
     expect(ready).toMatchObject({
       packageVersion: version,
       nodeOk: true,
@@ -155,7 +155,7 @@ test("qa.status does not include a fixture API key from the environment", async 
     expect(ready.problems).toEqual(ready.browserOk ? [] : ["Chromium is not installed"]);
 
     delete process.env[API_KEY_ENV];
-    const missingKey = await callJson("qa.status", { projectRoot });
+    const missingKey = await withCwd(projectRoot, () => callJson("qa.status", {}));
     expect(missingKey).toMatchObject({
       configOk: true,
       llmOk: false,
@@ -199,6 +199,16 @@ function textContent(result: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function withCwd<T>(directory: string, run: () => Promise<T>): Promise<T> {
+  const previous = process.cwd();
+  process.chdir(directory);
+  try {
+    return await run();
+  } finally {
+    process.chdir(previous);
+  }
 }
 
 function createProjectRoot(): string {

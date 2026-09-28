@@ -93,7 +93,6 @@ test("execute tool schemas have no model or objective field", () => {
     "authProfile",
     "headed",
     "collectTrace",
-    "projectRoot",
   ]);
   expect(flowShape.flowId).toBeInstanceOf(ZodString);
   expect(flowShape.inputs).toBeInstanceOf(ZodDefault);
@@ -107,7 +106,6 @@ test("execute tool schemas have no model or objective field", () => {
     "flowIds",
     "workers",
     "authStrategy",
-    "projectRoot",
   ]);
   expect(suiteShape.flowIds).toBeInstanceOf(ZodArray);
   expect(suiteShape.authStrategy).toBeInstanceOf(ZodOptional);
@@ -132,16 +130,17 @@ test("qa.execute_flow calls executeFlow once and forwards collectTrace false", a
     result: runResult("run-1", "project.archive", "failed", failure),
   });
 
-  const output = await executeFlowTool.handler({
-    flowId: "project.archive",
-    inputs: { sku: "a-1" },
-    authProfile: "project-owner",
-    headed: true,
-    collectTrace: false,
-    projectRoot,
-    model: "company-ui-agent",
-    objective: "Archive a project",
-  });
+  const output = await withCwd(projectRoot, () =>
+    executeFlowTool.handler({
+      flowId: "project.archive",
+      inputs: { sku: "a-1" },
+      authProfile: "project-owner",
+      headed: true,
+      collectTrace: false,
+      model: "company-ui-agent",
+      objective: "Archive a project",
+    }),
+  );
 
   expect(executeFlow).toHaveBeenCalledTimes(1);
   expect(executeFlow).toHaveBeenCalledWith({
@@ -164,10 +163,11 @@ test("qa.execute_flow calls executeFlow once and forwards collectTrace false", a
 test("qa.execute_flow omits failure when the run has none", async () => {
   const projectRoot = createProjectRoot();
 
-  const output = await executeFlowTool.handler({
-    flowId: "project.archive",
-    projectRoot,
-  });
+  const output = await withCwd(projectRoot, () =>
+    executeFlowTool.handler({
+      flowId: "project.archive",
+    }),
+  );
 
   expect(executeFlow).toHaveBeenCalledTimes(1);
   expect(executeFlow).toHaveBeenCalledWith({
@@ -195,12 +195,13 @@ test("qa.execute_suite calls executeSuite once with shared auth and no workers",
   };
   vi.mocked(executeSuite).mockResolvedValue(aggregate);
 
-  const output = await executeSuiteTool.handler({
-    flowIds: ["project.archive", "project.restore"],
-    projectRoot,
-    model: "company-ui-agent",
-    objective: "Run the suite",
-  });
+  const output = await withCwd(projectRoot, () =>
+    executeSuiteTool.handler({
+      flowIds: ["project.archive", "project.restore"],
+      model: "company-ui-agent",
+      objective: "Run the suite",
+    }),
+  );
 
   expect(executeSuite).toHaveBeenCalledTimes(1);
   const options = vi.mocked(executeSuite).mock.calls[0]?.[0];
@@ -219,12 +220,13 @@ test("qa.execute_suite calls executeSuite once with shared auth and no workers",
 test("qa.execute_suite forwards workers and per-worker auth", async () => {
   const projectRoot = createProjectRoot();
 
-  await executeSuiteTool.handler({
-    flowIds: ["project.archive"],
-    workers: 2,
-    authStrategy: "per-worker",
-    projectRoot,
-  });
+  await withCwd(projectRoot, () =>
+    executeSuiteTool.handler({
+      flowIds: ["project.archive"],
+      workers: 2,
+      authStrategy: "per-worker",
+    }),
+  );
 
   expect(executeSuite).toHaveBeenCalledTimes(1);
   expect(executeSuite).toHaveBeenCalledWith(
@@ -275,6 +277,16 @@ function readToolSource(filename: string): string {
     fileURLToPath(new URL(`../../../src/mcp/tools/${filename}`, import.meta.url)),
     "utf8",
   );
+}
+
+async function withCwd<T>(directory: string, run: () => Promise<T>): Promise<T> {
+  const previous = process.cwd();
+  process.chdir(directory);
+  try {
+    return await run();
+  } finally {
+    process.chdir(previous);
+  }
 }
 
 function createProjectRoot(): string {
