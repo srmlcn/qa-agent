@@ -308,6 +308,69 @@ test("network keeps the default header list and still redacts url secrets", asyn
   expect(serialized).toContain(apiKey);
 });
 
+test("network redacts encoded, short, and fragment secrets", async () => {
+  const slashSecret = "a/b-secret";
+  const spaceSecret = "a b-secret";
+  const shortSecret = "abc1234";
+  const fragmentSecret = "secret-value";
+  setDebugSession({
+    ...session(recordingPage([]), createArtifactDir(), recordingTrace([])),
+    redactHeaders: ["x-slash", "x-space", "x-token"],
+    network: [
+      {
+        method: "GET",
+        url: [
+          "https://app/callback?slash=a%2fb-secret&upper=a%2Fb-secret",
+          `&space=a+b-secret&encoded=a%20b-secret&target=${shortSecret}&keep=yes`,
+          `#access_token=${fragmentSecret}&ok=1`,
+        ].join(""),
+        status: 200,
+        headers: {
+          "x-slash": slashSecret,
+          "x-space": spaceSecret,
+          "x-token": shortSecret,
+        },
+      },
+      {
+        method: "GET",
+        url: `https://app/callback#access_token=${fragmentSecret}`,
+        status: 302,
+        headers: {},
+      },
+    ],
+  });
+
+  const network = await toolNamed("browser.network").handler({});
+  expect(network).toEqual({
+    events: [
+      {
+        method: "GET",
+        url: "https://app/callback?slash=[redacted]&upper=[redacted]&space=[redacted]&encoded=[redacted]&target=[redacted]&keep=yes#access_token=[redacted]&ok=1",
+        status: 200,
+        headers: {
+          "x-slash": "[redacted]",
+          "x-space": "[redacted]",
+          "x-token": "[redacted]",
+        },
+      },
+      {
+        method: "GET",
+        url: "https://app/callback#access_token=[redacted]",
+        status: 302,
+        headers: {},
+      },
+    ],
+  });
+  const serialized = JSON.stringify(network);
+  expect(serialized).not.toContain(slashSecret);
+  expect(serialized).not.toContain("a%2fb-secret");
+  expect(serialized).not.toContain("a%2Fb-secret");
+  expect(serialized).not.toContain("a+b-secret");
+  expect(serialized).not.toContain("a%20b-secret");
+  expect(serialized).not.toContain(shortSecret);
+  expect(serialized).not.toContain(fragmentSecret);
+});
+
 test("console redacts authorization, json secrets, and cookies in text and url", async () => {
   const authSecret = "console-auth-secret-value";
   const password = "console-password-secret";

@@ -211,7 +211,6 @@ function flattenHeaders(
 }
 
 const REDACTED = "[redacted]";
-const MIN_URL_SECRET_LENGTH = 8;
 const SENSITIVE_QUERY_NAMES = [
   "access_token",
   "refresh_token",
@@ -269,13 +268,19 @@ function scrubHeaderSecrets(
     }
   }
   const ordered = [...secrets].sort((left, right) => right.length - left.length);
-  let result = url;
+  const ranges: Array<{ start: number; end: number }> = [];
   for (const secret of ordered) {
-    result = replaceLiteral(result, secret, REDACTED);
-    const encoded = encodeURIComponent(secret);
-    if (encoded !== secret) {
-      result = replaceLiteral(result, encoded, REDACTED);
+    for (const span of findSecretSpans(url, secret)) {
+      if (overlaps(ranges, span.start, span.end)) {
+        continue;
+      }
+      ranges.push(span);
     }
+  }
+  ranges.sort((left, right) => right.start - left.start);
+  let result = url;
+  for (const range of ranges) {
+    result = `${result.slice(0, range.start)}${REDACTED}${result.slice(range.end)}`;
   }
   return result;
 }
@@ -298,10 +303,69 @@ function secretPieces(value: string): string[] {
 }
 
 function collectSecret(value: string, pieces: string[]): void {
-  if (value.length < MIN_URL_SECRET_LENGTH || value === REDACTED) {
+  if (value.length === 0) {
     return;
   }
   pieces.push(value);
+}
+
+function findSecretSpans(
+  url: string,
+  secret: string,
+): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const match of url.matchAll(secretPattern(secret))) {
+    if (match.index === undefined) {
+      continue;
+    }
+    spans.push({ start: match.index, end: match.index + match[0].length });
+  }
+  return spans;
+}
+
+function overlaps(
+  ranges: ReadonlyArray<{ start: number; end: number }>,
+  start: number,
+  end: number,
+): boolean {
+  return ranges.some((range) => start < range.end && end > range.start);
+}
+
+/**
+ * Matches the secret raw, as a case-insensitive percent-encoding, and with
+ * form-style "+" for spaces. `a/b-secret` therefore matches `a%2fb-secret`.
+ */
+function secretPattern(secret: string): RegExp {
+  let source = "";
+  for (const char of secret) {
+    const encoded = encodeURIComponent(char);
+    if (encoded === char) {
+      source += escapeRegExp(char);
+      continue;
+    }
+    const options = [escapeRegExp(char), percentCaseInsensitive(encoded)];
+    if (char === " ") {
+      options.push("\\+");
+    }
+    source += `(?:${options.join("|")})`;
+  }
+  return new RegExp(source, "g");
+}
+
+function percentCaseInsensitive(encoded: string): string {
+  return encoded.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) => {
+    const digits = hex
+      .split("")
+      .map((digit) =>
+        /[A-Fa-f]/.test(digit) ? `[${digit.toUpperCase()}${digit.toLowerCase()}]` : digit,
+      )
+      .join("");
+    return `%${digits}`;
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
 function redactUserinfoPassword(url: string): string {
@@ -312,21 +376,28 @@ function redactUserinfoPassword(url: string): string {
 }
 
 function redactNamedQueryValues(url: string, headerNames: readonly string[]): string {
+  const names = sensitiveQueryNames(headerNames);
   const hashIndex = url.indexOf("#");
   const beforeHash = hashIndex === -1 ? url : url.slice(0, hashIndex);
-  const hash = hashIndex === -1 ? "" : url.slice(hashIndex);
   const queryIndex = beforeHash.indexOf("?");
-  if (queryIndex === -1) {
-    return url;
+  const pathAndQuery =
+    queryIndex === -1
+      ? beforeHash
+      : `${beforeHash.slice(0, queryIndex + 1)}${redactNamedSection(
+          beforeHash.slice(queryIndex + 1),
+          names,
+        )}`;
+  if (hashIndex === -1) {
+    return pathAndQuery;
   }
-  const names = sensitiveQueryNames(headerNames);
-  const prefix = beforeHash.slice(0, queryIndex + 1);
-  const query = beforeHash
-    .slice(queryIndex + 1)
+  return `${pathAndQuery}#${redactNamedSection(url.slice(hashIndex + 1), names)}`;
+}
+
+function redactNamedSection(section: string, names: ReadonlySet<string>): string {
+  return section
     .split("&")
     .map((pair) => redactQueryPair(pair, names))
     .join("&");
-  return `${prefix}${query}${hash}`;
 }
 
 function sensitiveQueryNames(headerNames: readonly string[]): Set<string> {
@@ -360,9 +431,3 @@ function decodeQueryComponent(value: string): string {
   }
 }
 
-function replaceLiteral(text: string, needle: string, replacement: string): string {
-  if (needle.length === 0 || !text.includes(needle)) {
-    return text;
-  }
-  return text.split(needle).join(replacement);
-}
