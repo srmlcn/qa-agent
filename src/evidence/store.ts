@@ -252,7 +252,6 @@ function toStoredArtifactPath(runDir: string, artifactPath: string): string {
   if (!isAbsolute(artifactPath)) {
     assertRelativeSafe(artifactPath.split(sep).join("/"));
   }
-  assertRealContained(runDir, resolved);
 
   const stored = relative(resolve(runDir), resolved).split(sep).join("/");
   assertRelativeSafe(stored);
