@@ -213,6 +213,49 @@ test("attach keeps absolute paths in process and rejects traversal", () => {
   );
 });
 
+test("an oversized response keeps bodyOmitted through write and read", () => {
+  const result = minimalResult(RUN_ID);
+  result.network.responses.push({
+    method: "GET",
+    url: "https://app.example/oversized",
+    status: 200,
+    timing: 5,
+    headers: { "content-type": "text/plain" },
+    bodyOmitted: true,
+  });
+
+  writeRun(projectRoot, result);
+
+  const stored = readRun(projectRoot, RUN_ID);
+  const response = stored.network.responses[0];
+  expect(response?.body).toBeUndefined();
+  expect(Object.hasOwn(response ?? {}, "body")).toBe(false);
+  expect(response?.bodyOmitted).toBe(true);
+  expect(JSON.stringify(stored)).not.toContain("oversized-body-secret");
+});
+
+test("readRun rejects a bodyOmitted value other than true", () => {
+  const runDir = createRunDir(projectRoot, RUN_ID);
+  writeRun(projectRoot, minimalResult(RUN_ID));
+  const filePath = join(runDir, "result.json");
+  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as {
+    network: { responses: Array<Record<string, unknown>> };
+  };
+  parsed.network.responses.push({
+    method: "GET",
+    url: "https://app.example/oversized",
+    status: 200,
+    timing: 1,
+    headers: {},
+    bodyOmitted: false,
+  });
+  writeFileSync(filePath, `${JSON.stringify(parsed, null, 2)}\n`);
+
+  expect(() => readRun(projectRoot, RUN_ID)).toThrow(
+    /Invalid run result field: network\.responses\.0\.bodyOmitted/,
+  );
+});
+
 test("run id length and separator rules reject unsafe ids", () => {
   expect(() => createRunDir(projectRoot, "abc")).toThrow(/Invalid run id/);
   expect(() => createRunDir(projectRoot, "a".repeat(81))).toThrow(
