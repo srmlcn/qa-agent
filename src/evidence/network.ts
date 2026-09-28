@@ -48,10 +48,12 @@ export async function startCapture(
   options: CaptureOptions,
 ): Promise<CaptureSession> {
   const capture = createCapture();
+  const meter = createBodyMeter();
   const responses: Response[] = [];
   const failures: Request[] = [];
   const pending: Promise<void>[] = [];
   let stopped = false;
+  let releaseMeter: () => void = () => {};
 
   const stashResponse = (response: Response): void => {
     if (!stopped) {
@@ -80,7 +82,7 @@ export async function startCapture(
         return;
       }
       const response = responses.shift();
-      track(pending, recordResponse(capture, event, response, options));
+      track(pending, recordResponse(capture, event, response, options, meter));
       return;
     }
     if (event.type === "requestfailed") {
@@ -113,8 +115,13 @@ export async function startCapture(
 
   let detachEvents: () => void;
   try {
+    if (options.evidence.network) {
+      releaseMeter = await attachDecodedSizeMeter(page, meter);
+    }
     detachEvents = await attachPageEvents(page, onEvent);
   } catch (error) {
+    meter.close();
+    releaseMeter();
     page.off("response", stashResponse);
     page.off("requestfailed", stashFailure);
     throw error;
@@ -128,8 +135,12 @@ export async function startCapture(
       page.off("requestfailed", stashFailure);
       responses.length = 0;
       failures.length = 0;
+      // Unblock an in-flight size wait before flushing it. Otherwise stop
+      // would wait on the read, and the read would wait on stop.
+      meter.close();
     }
     await flush(pending);
+    releaseMeter();
   };
 
   return { capture, stop };
@@ -158,10 +169,11 @@ async function recordResponse(
   event: BrowserEvent,
   response: Response | undefined,
   options: CaptureOptions,
+  meter: BodyMeter,
 ): Promise<void> {
   try {
     capture.network.responses.push(
-      await buildResponse(event, response, options),
+      await buildResponse(event, response, options, meter),
     );
   } catch {
     capture.network.responses.push(eventResponse(event, options));
@@ -189,6 +201,7 @@ async function buildResponse(
   event: BrowserEvent,
   response: Response | undefined,
   options: CaptureOptions,
+  meter: BodyMeter,
 ): Promise<NetworkRecord> {
   if (response === undefined) {
     return eventResponse(event, options);
@@ -196,6 +209,12 @@ async function buildResponse(
 
   const cap = options.evidence.maxResponseBodyBytes;
   const request = response.request();
+  // Claim the size slot before the first await so concurrent responses keep
+  // header order. The read itself waits until those bytes have arrived.
+  const reservation = meter.reserve(
+    response.url() || event.url || "",
+    request.method() || event.method || "GET",
+  );
   const [requestHeaders, responseHeaders] = await Promise.all([
     readHeaders(
       () => request.allHeaders(),
@@ -225,14 +244,26 @@ async function buildResponse(
   }
 
   try {
-    const bytes = await response.body();
-    if (bytes.length > cap) {
-      return withoutBody(base);
-    }
-    return withBody(base, redactBody(bytes.toString("utf8"), cap));
+    await response.finished();
   } catch {
     return withoutBody(base);
   }
+
+  // response.body() buffers the decoded payload. Content-Length is absent for
+  // chunked responses and can be smaller than that payload, so the received
+  // byte count has to win before the read.
+  const measured = await reservation.bytes();
+  const captured = await readCappedBody({
+    cap,
+    contentType,
+    advertisedLength: advertised,
+    measuredBytes: measured,
+    readBody: () => response.body(),
+  });
+  if ("body" in captured) {
+    return withBody(base, captured.body);
+  }
+  return withoutBody(base);
 }
 
 async function buildFailure(
@@ -349,6 +380,299 @@ function isJsonOrText(contentType: string | undefined): boolean {
     return true;
   }
   return mediaType === "application/json" || mediaType.endsWith("+json");
+}
+
+export type CappedBodyRead = {
+  cap: number;
+  contentType: string | undefined;
+  advertisedLength: number | undefined;
+  /** Decoded bytes already received. Unknown sizes are not read. */
+  measuredBytes: number | undefined;
+  readBody: () => Promise<Buffer>;
+};
+
+/**
+ * Reads a text or JSON body only when its size is known and within the cap.
+ * `readBody` is not called for an oversized payload, including when
+ * Content-Length is missing or smaller than the measured bytes.
+ */
+export async function readCappedBody(
+  input: CappedBodyRead,
+): Promise<{ body: string } | { bodyOmitted: true }> {
+  if (!isJsonOrText(input.contentType)) {
+    return { bodyOmitted: true };
+  }
+  if (input.advertisedLength !== undefined && input.advertisedLength > input.cap) {
+    return { bodyOmitted: true };
+  }
+  if (input.measuredBytes === undefined || input.measuredBytes > input.cap) {
+    return { bodyOmitted: true };
+  }
+
+  try {
+    const bytes = await input.readBody();
+    if (bytes.length > input.cap) {
+      return { bodyOmitted: true };
+    }
+    return { body: redactBody(bytes.toString("utf8"), input.cap) };
+  } catch {
+    return { bodyOmitted: true };
+  }
+}
+
+type MeterEntry = {
+  url: string;
+  method: string;
+  decoded: number;
+  claimed: boolean;
+  done: boolean;
+  aborted: boolean;
+  finish: () => void;
+  finished: Promise<void>;
+};
+
+type MeterWaiter = {
+  url: string;
+  method: string;
+  resolve: (entry: MeterEntry | undefined) => void;
+};
+
+export type BodyReservation = {
+  /** Resolves with the decoded size after the response finishes loading. */
+  bytes: () => Promise<number | undefined>;
+};
+
+export type BodyMeter = {
+  noteRequest: (requestId: string, url: string, method: string) => void;
+  noteData: (requestId: string, byteLength: number) => void;
+  noteFinished: (requestId: string) => void;
+  reserve: (url: string, method: string) => BodyReservation;
+  close: () => void;
+};
+
+/**
+ * Counts decoded response bytes from CDP data lengths. Chunk payloads are
+ * not retained, so an oversized body never becomes one buffer here.
+ */
+export function createBodyMeter(): BodyMeter {
+  const byId = new Map<string, MeterEntry>();
+  const pending = new MeterWaiterQueue();
+  const finishedEarly = new Set<string>();
+  let closed = false;
+
+  const noteRequest = (requestId: string, url: string, method: string): void => {
+    if (closed) {
+      return;
+    }
+    const entry = entryFor(byId, requestId);
+    if (!entry.claimed) {
+      entry.url = url;
+      entry.method = method.toUpperCase();
+    }
+    if (finishedEarly.delete(requestId)) {
+      markDone(entry, false);
+    }
+    pending.match(entry);
+  };
+
+  const noteData = (requestId: string, byteLength: number): void => {
+    if (closed || !Number.isFinite(byteLength) || byteLength <= 0) {
+      return;
+    }
+    const entry = entryFor(byId, requestId);
+    // The reservation claims this entry when headers arrive, which is before
+    // the body chunks. Keep counting until the load finishes.
+    if (entry.done) {
+      return;
+    }
+    const next = entry.decoded + byteLength;
+    entry.decoded = next > Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : next;
+  };
+
+  const noteFinished = (requestId: string): void => {
+    if (closed) {
+      return;
+    }
+    const entry = byId.get(requestId);
+    if (entry === undefined) {
+      finishedEarly.add(requestId);
+      return;
+    }
+    markDone(entry, false);
+  };
+
+  const reserve = (url: string, method: string): BodyReservation => {
+    const normalized = method.toUpperCase();
+    if (closed) {
+      return { bytes: async () => undefined };
+    }
+    const existing = unclaimed(byId, url, normalized);
+    if (existing !== undefined) {
+      existing.claimed = true;
+      return { bytes: () => bytesOf(existing) };
+    }
+    let resolveEntry: (entry: MeterEntry | undefined) => void = () => {};
+    const entryPromise = new Promise<MeterEntry | undefined>((resolve) => {
+      resolveEntry = resolve;
+    });
+    pending.add({ url, method: normalized, resolve: resolveEntry });
+    return {
+      bytes: async () => bytesOf(await entryPromise),
+    };
+  };
+
+  const close = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    pending.rejectAll();
+    for (const entry of byId.values()) {
+      markDone(entry, !entry.done);
+    }
+    byId.clear();
+    finishedEarly.clear();
+  };
+
+  return { noteRequest, noteData, noteFinished, reserve, close };
+}
+
+function entryFor(byId: Map<string, MeterEntry>, requestId: string): MeterEntry {
+  const existing = byId.get(requestId);
+  if (existing !== undefined) {
+    return existing;
+  }
+  let finish: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const entry: MeterEntry = {
+    url: "",
+    method: "",
+    decoded: 0,
+    claimed: false,
+    done: false,
+    aborted: false,
+    finish,
+    finished,
+  };
+  byId.set(requestId, entry);
+  return entry;
+}
+
+function markDone(entry: MeterEntry, aborted: boolean): void {
+  if (entry.done) {
+    return;
+  }
+  entry.aborted = aborted;
+  entry.done = true;
+  entry.finish();
+}
+
+function unclaimed(
+  byId: Map<string, MeterEntry>,
+  url: string,
+  method: string,
+): MeterEntry | undefined {
+  for (const entry of byId.values()) {
+    if (!entry.claimed && entry.url === url && entry.method === method) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+async function bytesOf(entry: MeterEntry | undefined): Promise<number | undefined> {
+  if (entry === undefined) {
+    return undefined;
+  }
+  if (!entry.done) {
+    await entry.finished;
+  }
+  if (entry.aborted) {
+    return undefined;
+  }
+  return entry.decoded;
+}
+
+class MeterWaiterQueue {
+  private readonly waiters: MeterWaiter[] = [];
+
+  add(waiter: MeterWaiter): void {
+    this.waiters.push(waiter);
+  }
+
+  match(entry: MeterEntry): void {
+    if (entry.claimed || entry.url.length === 0) {
+      return;
+    }
+    const index = this.waiters.findIndex(
+      (waiter) => waiter.url === entry.url && waiter.method === entry.method,
+    );
+    if (index < 0) {
+      return;
+    }
+    const waiter = this.waiters[index];
+    if (waiter === undefined) {
+      return;
+    }
+    this.waiters.splice(index, 1);
+    entry.claimed = true;
+    waiter.resolve(entry);
+  }
+
+  rejectAll(): void {
+    const waiting = this.waiters.splice(0, this.waiters.length);
+    for (const waiter of waiting) {
+      waiter.resolve(undefined);
+    }
+  }
+}
+
+async function attachDecodedSizeMeter(
+  page: Page,
+  meter: BodyMeter,
+): Promise<() => void> {
+  const session = await page.context().newCDPSession(page);
+  let released = false;
+  const release = (): void => {
+    if (released) {
+      return;
+    }
+    released = true;
+    session.off("Network.requestWillBeSent", onRequest);
+    session.off("Network.dataReceived", onData);
+    session.off("Network.loadingFinished", onFinished);
+    session.off("Network.loadingFailed", onFinished);
+    void session.detach().catch(() => {
+      // The page may already be closed.
+    });
+  };
+
+  const onRequest = (event: {
+    requestId: string;
+    request: { url: string; method: string };
+  }): void => {
+    meter.noteRequest(event.requestId, event.request.url, event.request.method);
+  };
+  const onData = (event: { requestId: string; dataLength: number }): void => {
+    meter.noteData(event.requestId, event.dataLength);
+  };
+  const onFinished = (event: { requestId: string }): void => {
+    meter.noteFinished(event.requestId);
+  };
+
+  session.on("Network.requestWillBeSent", onRequest);
+  session.on("Network.dataReceived", onData);
+  session.on("Network.loadingFinished", onFinished);
+  session.on("Network.loadingFailed", onFinished);
+  try {
+    await session.send("Network.enable");
+  } catch (error) {
+    release();
+    throw error;
+  }
+  return release;
 }
 
 function elapsedMs(request: Request): number {
