@@ -5,6 +5,7 @@ import {
   DEFAULT_MAX_RESPONSE_BODY_BYTES,
   DEFAULT_REDACT_HEADERS,
 } from "../../config/defaults.js";
+import { redactSavedTrace } from "../../evidence/traces.js";
 import { QaError, type QaErrorJson } from "../../errors/qa-error.js";
 import { redactBody, redactCookies, redactHeaders } from "../../security/redaction.js";
 import type { McpTool } from "../load-tools.js";
@@ -160,6 +161,7 @@ async function saveTrace(): Promise<unknown> {
   const filePath = artifactFile(session.artifactDir, TRACE_FILE);
   mkdirSync(session.artifactDir, { recursive: true });
   await session.context.tracing.stop({ path: filePath });
+  redactSavedTrace(filePath, session.redactHeaders);
   return { trace: TRACE_FILE };
 }
 

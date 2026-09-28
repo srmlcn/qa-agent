@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crc32, deflateRawSync } from "node:zlib";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, expect, test } from "vitest";
@@ -178,6 +180,35 @@ test("screenshot and trace write only inside the active run artifact directory",
   expect(traces).toEqual([join(artifactDir, "trace.zip")]);
   expect(existsSync(join(artifactDir, "screenshot.png"))).toBe(true);
   expect(existsSync(join(artifactDir, "trace.zip"))).toBe(true);
+});
+
+test("browser.trace redacts cookie, authorization, and configured header secrets", async () => {
+  const cookie = "debug-cookie-secret-9f3a";
+  const auth = "debug-auth-secret-9f3a";
+  const custom = "debug-custom-secret-9f3a";
+  const marker = "debug-accept-marker-9f3a";
+  const artifactDir = createArtifactDir();
+  const traces: string[] = [];
+  setDebugSession({
+    ...session(
+      recordingPage([]),
+      artifactDir,
+      recordingTrace(traces, secretTraceZip(cookie, auth, custom, marker)),
+    ),
+    redactHeaders: ["authorization", "cookie", "set-cookie", "x-secret-token"],
+  });
+
+  expect(await toolNamed("browser.trace").handler({})).toEqual({
+    trace: "trace.zip",
+  });
+  const saved = join(artifactDir, "trace.zip");
+  expect(traces).toEqual([saved]);
+  const text = unzip(saved);
+  expect(text.includes(Buffer.from(cookie))).toBe(false);
+  expect(text.includes(Buffer.from(auth))).toBe(false);
+  expect(text.includes(Buffer.from(custom))).toBe(false);
+  expect(text.includes(Buffer.from(marker))).toBe(true);
+  expect(text.includes(Buffer.from("[redacted]"))).toBe(true);
 });
 
 test("network and console results omit secrets and raw document HTML", async () => {
@@ -499,7 +530,10 @@ function recordingPage(shots: string[]): DebugPage {
   };
 }
 
-function recordingTrace(traces: string[]): DebugBrowserContext {
+function recordingTrace(
+  traces: string[],
+  zip: Buffer = emptyZip(),
+): DebugBrowserContext {
   return {
     tracing: {
       stop: async (options) => {
@@ -508,11 +542,99 @@ function recordingTrace(traces: string[]): DebugBrowserContext {
           return;
         }
         traces.push(options.path);
-        writeFileSync(options.path, "zip");
+        writeFileSync(options.path, zip);
       },
     },
   };
 }
+
+function emptyZip(): Buffer {
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  return eocd;
+}
+
+function secretTraceZip(
+  cookie: string,
+  auth: string,
+  custom: string,
+  marker: string,
+): Buffer {
+  const network = {
+    type: "resource-snapshot",
+    snapshot: {
+      request: {
+        cookies: [{ name: "session", value: cookie }],
+        headers: [
+          { name: "Accept", value: marker },
+          { name: "authorization", value: `Bearer ${auth}` },
+          { name: "cookie", value: `session=${cookie}` },
+          { name: "x-secret-token", value: custom },
+        ],
+      },
+    },
+  };
+  return deflatedZip([
+    { name: "trace.network", data: `${JSON.stringify(network)}\n` },
+  ]);
+}
+
+function deflatedZip(files: { name: string; data: string }[]): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const file of files) {
+    const data = Buffer.from(file.data, "utf8");
+    const name = Buffer.from(file.name, "utf8");
+    const compressed = deflateRawSync(data);
+    const checksum = crc32(data) >>> 0;
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x808, 6);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt16LE(name.length, 26);
+    const descriptor = Buffer.alloc(16);
+    descriptor.writeUInt32LE(0x08074b50, 0);
+    descriptor.writeUInt32LE(checksum, 4);
+    descriptor.writeUInt32LE(compressed.length, 8);
+    descriptor.writeUInt32LE(data.length, 12);
+    locals.push(local, name, compressed, descriptor);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x808, 8);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(checksum, 16);
+    central.writeUInt32LE(compressed.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, name);
+    offset += 30 + name.length + compressed.length + 16;
+  }
+  const centralDirectory = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(centralDirectory.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralDirectory, eocd]);
+}
+
+function unzip(filePath: string): Buffer {
+  return execFileSync("python3", ["-c", PYTHON_UNZIP, filePath]);
+}
+
+const PYTHON_UNZIP = `
+import sys
+import zipfile
+archive = zipfile.ZipFile(sys.argv[1])
+for info in archive.infolist():
+    sys.stdout.buffer.write(archive.read(info.filename))
+`;
 
 function createArtifactDir(): string {
   const root = mkdtempSync(join(tmpdir(), "qa-debug-artifacts-"));
