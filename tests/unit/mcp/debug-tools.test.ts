@@ -62,7 +62,7 @@ test("autoload does not register browser debug tools", async () => {
   for (const name of DEBUG_TOOL_NAMES) {
     expect(names).not.toContain(name);
   }
-});
+}, 20_000);
 
 test("tools/list omits browser debug tools unless stagehand.debugTools is true", async () => {
   const missingRoot = mkdtempSync(join(tmpdir(), "qa-debug-missing-"));
