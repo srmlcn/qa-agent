@@ -216,6 +216,32 @@ test("a close failure with no earlier error still surfaces", async () => {
   ).rejects.toBe(closeError);
 });
 
+test("a close failure after an undefined rejection keeps that rejection", async () => {
+  const closeError = new Error("browser close failed");
+  let closed = 0;
+  const client = {
+    run(): Promise<never> {
+      return Promise.reject(undefined);
+    },
+    async close() {
+      closed += 1;
+      throw closeError;
+    },
+  };
+
+  await expect(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 5,
+      client,
+    }),
+  ).rejects.toBeUndefined();
+  expect(closed).toBe(1);
+});
+
 test("a disallowed URL throws POLICY_BLOCKED before the client acts", async () => {
   let ran = 0;
   let closed = 0;
