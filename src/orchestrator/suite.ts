@@ -94,7 +94,8 @@ function perWorkerPlan(config: ProjectConfig): ProfilePlan {
       readProfilePath(config.project.id, profile),
     ),
     profileFor(workerIndex: number): string | undefined {
-      return profiles[workerIndex];
+      // Same slot as runPool storageStateFor: workerIndex % length.
+      return profiles[workerIndex % profiles.length];
     },
   };
 }
