@@ -36,7 +36,8 @@ export type ProviderCheckResult =
  * An `openai` config with no base URL uses `https://api.openai.com/v1`.
  * An `openai-compatible` config with no base URL throws `LLM_PROVIDER_UNAVAILABLE`.
  * The API key is read from `process.env[apiKeyEnv]` and added only as
- * `Authorization` on the returned headers.
+ * `Authorization` on the returned headers. A missing or empty environment
+ * value removes every Authorization header.
  */
 export function createProvider(config: LlmConfig): LlmProvider {
   return {
@@ -142,13 +143,13 @@ function headersWithKey(
   apiKey: string | undefined,
 ): Record<string, string> {
   const headers: Record<string, string> = { ...(configHeaders ?? {}) };
-  if (apiKey === undefined) {
-    return headers;
-  }
   for (const name of Object.keys(headers)) {
     if (name.toLowerCase() === "authorization") {
       delete headers[name];
     }
+  }
+  if (apiKey === undefined) {
+    return headers;
   }
   headers.Authorization = `Bearer ${apiKey}`;
   return headers;
