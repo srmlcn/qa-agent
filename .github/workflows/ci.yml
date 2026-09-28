@@ -33,3 +33,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end acceptance
+        run: npm run test:e2e
