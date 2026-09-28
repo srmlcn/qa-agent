@@ -69,6 +69,28 @@ test("save then list then read returns the same steps", () => {
   );
 });
 
+test("dotted and hyphenated flow ids round-trip in distinct files", () => {
+  const dotted = sampleFlow({ id: "a.b.c", name: "Dotted id" });
+  const hyphenated = sampleFlow({ id: "a.b--c", name: "Hyphenated id" });
+  save(projectRoot, dotted);
+  save(projectRoot, hyphenated);
+
+  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  expect(readdirSync(flowsDir).sort()).toEqual(["a--b--c.yml", "a--b__c.yml"]);
+  expect(readFileSync(join(flowsDir, "a--b--c.yml"), "utf8")).toBe(
+    stringifyFlow(dotted, "yaml"),
+  );
+  expect(readFileSync(join(flowsDir, "a--b__c.yml"), "utf8")).toBe(
+    stringifyFlow(hyphenated, "yaml"),
+  );
+  expect(read(projectRoot, dotted.id)).toEqual(dotted);
+  expect(read(projectRoot, hyphenated.id)).toEqual(hyphenated);
+  expect(list(projectRoot).map((item) => item.id).sort()).toEqual([
+    "a.b--c",
+    "a.b.c",
+  ]);
+});
+
 test("list payloads have no steps key", () => {
   save(projectRoot, sampleFlow());
   save(projectRoot, sampleFlow({ id: "project.create", name: "Create a project" }));

@@ -115,7 +115,9 @@ function flowFilePath(projectRoot: string, id: string): string {
 function encodedFileName(id: string): string {
   assertFlowId(id);
   // `project.archive` is stored as `project--archive.yml`.
-  const filename = `${id.replaceAll(".", "--")}.yml`;
+  // Escape `-` to `_` before dots become `--`. `_` is outside the flow-id
+  // alphabet, so `a.b.c` and `a.b--c` cannot share `a--b--c.yml`.
+  const filename = `${id.replaceAll("-", "_").replaceAll(".", "--")}.yml`;
   if (!isSinglePathSegment(filename)) {
     throw flowValidationFailed(`Invalid flow id: ${id}`, id);
   }
