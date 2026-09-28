@@ -126,6 +126,7 @@ function resolveRunDir(projectRoot: string, runId: string): string {
     throw new Error(`Invalid run id: ${runId}`);
   }
   assertNotUnderAuth(runDir);
+  assertRealContained(root, runDir);
   return runDir;
 }
 

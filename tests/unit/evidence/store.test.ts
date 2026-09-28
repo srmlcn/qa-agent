@@ -294,6 +294,16 @@ test("createRunDir refuses a symlink ancestor that lands in the auth home", () =
   expect(readdirSync(auth)).toEqual([]);
 });
 
+test("createRunDir refuses a symlink ancestor that escapes the project root", () => {
+  const outside = join(scratch, "outside-artifacts");
+  mkdirSync(outside, { recursive: true });
+  symlinkSync(outside, join(projectRoot, ".autonomous-qa"));
+
+  expect(() => createRunDir(projectRoot, RUN_ID)).toThrow(/Invalid artifact path/);
+  expect(existsSync(join(outside, "artifacts", RUN_ID))).toBe(false);
+  expect(readdirSync(outside)).toEqual([]);
+});
+
 test("artifact containment realpaths a symlinked parent when the leaf is missing", () => {
   const runDir = createRunDir(projectRoot, RUN_ID);
   const outsideDir = join(scratch, "outside-shots");
