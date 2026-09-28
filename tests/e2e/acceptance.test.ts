@@ -60,6 +60,9 @@ const SUBMIT_LOCATOR = { type: "role" as const, role: "button", name: "Sign in" 
 
 const capturedLogs: string[] = [];
 const scratchDirs: string[] = [];
+let readCapturedStderr = (): string => {
+  throw new Error("stderr was not captured");
+};
 
 let previousCwd = "";
 let previousHome: string | undefined;
@@ -257,7 +260,10 @@ test(
         assertTreeClean(join(projectRoot, ".autonomous-qa", "flows"));
         assertTreeClean(join(projectRoot, ".autonomous-qa", "artifacts"));
         assertTreeClean(logsDir());
-        assertTextClean("captured logs", capturedLogs.join("\n"));
+        assertTextClean(
+          "captured console and stderr",
+          `${capturedLogs.join("\n")}\n${readCapturedStderr()}`,
+        );
       });
     } finally {
       await closeApp(archive);
@@ -463,12 +469,29 @@ function assertTextClean(label: string, text: string): void {
   expect(text.includes(SESSION_COOKIE), `${label} contains the session cookie`).toBe(false);
 }
 
+/**
+ * Console spies miss `createLogger`, which writes with `process.stderr.write`.
+ * Step 11 fails if either channel contains the fixture password or session cookie.
+ */
 function captureConsole(): void {
   for (const method of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
       capturedLogs.push(args.map(formatLogPart).join(" "));
     });
   }
+  const stderr = vi.spyOn(process.stderr, "write");
+  readCapturedStderr = () =>
+    stderr.mock.calls.map((call) => formatStderrChunk(call[0])).join("");
+}
+
+function formatStderrChunk(chunk: unknown): string {
+  if (typeof chunk === "string") {
+    return chunk;
+  }
+  if (chunk instanceof Uint8Array) {
+    return Buffer.from(chunk).toString("utf8");
+  }
+  return formatLogPart(chunk);
 }
 
 function formatLogPart(part: unknown): string {
