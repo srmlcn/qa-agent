@@ -9,6 +9,13 @@ import {
 import { QaError } from "../errors/qa-error.js";
 
 const SUPPORTED_BROWSER = "chromium";
+/**
+ * Playwright's graceful close waits on the browser process and its temp
+ * directories. That wait can outlive the step that already finished. Kill
+ * the process group and let the caller continue.
+ */
+const CLOSE_DEADLINE_MS = 5_000;
+const CLOSE_KILL_GRACE_MS = 1_000;
 
 export type StartBrowserOptions = {
   /** Defaults to Chromium. Any other name is rejected. */
@@ -165,14 +172,122 @@ async function teardown(
   context: BrowserContext | undefined,
   browser: Browser | undefined,
 ): Promise<void> {
-  await bestEffortClose(page);
-  await bestEffortClose(context);
-  await bestEffortClose(browser);
-  if (browser?.isConnected()) {
+  const pending = closeTargets(page, context, browser);
+  void pending.catch(() => {
+    // A deadline winner leaves this running. A later rejection is ignored.
+  });
+  const finished = await finishedWithin(pending, CLOSE_DEADLINE_MS);
+  if (!finished) {
+    killBrowserProcess(browser);
+    await finishedWithin(pending, CLOSE_KILL_GRACE_MS);
+    return;
+  }
+  if (isConnected(browser)) {
     throw new QaError({
       code: "BROWSER_CRASHED",
       message: "Failed to close Chromium.",
     });
+  }
+}
+
+async function closeTargets(
+  page: Page | undefined,
+  context: BrowserContext | undefined,
+  browser: Browser | undefined,
+): Promise<void> {
+  await bestEffortClose(page);
+  await bestEffortClose(context);
+  await bestEffortClose(browser);
+}
+
+function finishedWithin(work: Promise<void>, deadlineMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      finish(false);
+    }, deadlineMs);
+    work.then(
+      () => {
+        finish(true);
+      },
+      () => {
+        finish(true);
+      },
+    );
+  });
+}
+
+type SpawnedProcess = {
+  pid?: number;
+  kill: (signal: NodeJS.Signals) => boolean;
+};
+
+/**
+ * Playwright 1.63 removed `Browser.process()`. The in-process connection still
+ * exposes the launched child on the server browser.
+ */
+type BrowserInternals = Browser & {
+  _connection?: {
+    toImpl?: (object: Browser) => {
+      options?: {
+        browserProcess?: {
+          process?: SpawnedProcess;
+        };
+      };
+    } | null;
+  };
+};
+
+function killBrowserProcess(browser: Browser | undefined): void {
+  if (browser === undefined) {
+    return;
+  }
+  const child = spawnedProcess(browser);
+  const pid = child?.pid;
+  if (child === undefined || pid === undefined || pid <= 1) {
+    return;
+  }
+  try {
+    if (process.platform === "win32") {
+      child.kill("SIGKILL");
+      return;
+    }
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The process already exited.
+    }
+  }
+}
+
+function spawnedProcess(browser: Browser): SpawnedProcess | undefined {
+  try {
+    const internals = browser as BrowserInternals;
+    return internals._connection?.toImpl?.(browser)?.options?.browserProcess
+      ?.process;
+  } catch {
+    return undefined;
+  }
+}
+
+function isConnected(browser: Browser | undefined): boolean {
+  if (browser === undefined) {
+    return false;
+  }
+  try {
+    return browser.isConnected();
+  } catch {
+    return false;
   }
 }
 
