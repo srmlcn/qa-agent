@@ -48,7 +48,7 @@ export type DiscoverFlowResult = {
 
 /**
  * Checks the start URL, runs a bounded discovery session, compiles the
- * trajectory, replays it, and saves the validated flow.
+ * trajectory, replays it from that start URL, and saves the validated flow.
  * A replay failure saves the draft and returns that draft with the run error.
  * Destructive step intents are refused after compile and before replay.
  */
@@ -56,7 +56,7 @@ export async function discoverFlow(
   input: DiscoverFlowInput,
 ): Promise<DiscoverFlowResult> {
   const { runId, signal } = createRun(input.id);
-  const startUrl = input.startUrl ?? input.config.application.baseUrl;
+  const startUrl = resolveStartUrl(input);
   assertUrlAllowed(startUrl, input.config);
 
   const storageState =
@@ -130,6 +130,7 @@ async function replayDraft(
       signal,
       ...(storageState === undefined ? {} : { storageState }),
     });
+    await openReplayStart(session.page, input, flow);
     return await validateFlow({
       flow,
       page: session.page,
@@ -138,6 +139,36 @@ async function replayDraft(
   } finally {
     await session?.close();
   }
+}
+
+/**
+ * The discovery browser is already closed, so this page is `about:blank`.
+ * `openStartUrl` is not a compiled step. Open the allowlisted start URL
+ * before the compiled steps, unless the draft already begins with that `goto`.
+ */
+async function openReplayStart(
+  page: BrowserSession["page"],
+  input: DiscoverFlowInput,
+  flow: FlowSpec,
+): Promise<void> {
+  const startUrl = resolveStartUrl(input);
+  assertUrlAllowed(startUrl, input.config);
+  if (startsWithStartGoto(flow, startUrl)) {
+    return;
+  }
+  await page.goto(startUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: input.config.playwright.timeoutMs,
+  });
+}
+
+function resolveStartUrl(input: DiscoverFlowInput): string {
+  return input.startUrl ?? input.config.application.baseUrl;
+}
+
+function startsWithStartGoto(flow: FlowSpec, startUrl: string): boolean {
+  const first = flow.steps[0] as { action?: unknown; value?: unknown } | undefined;
+  return first?.action === "goto" && first.value === startUrl;
 }
 
 function recordPassed(builder: RunBuilder, flow: FlowSpec): void {
