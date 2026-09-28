@@ -97,6 +97,18 @@ test("tools/list covers the public MCP tool schema contract", async () => {
   const capture = publishedSchema(tools, "qa.capture_auth");
   expectRequired(capture, ["projectId", "profile", "startUrl"]);
 
+  for (const name of [
+    "qa.status",
+    "qa.list_flows",
+    "qa.discover_flow",
+    "qa.execute_flow",
+    "qa.execute_suite",
+    "qa.repair_flow",
+    "qa.capture_auth",
+  ]) {
+    expect(hasField(publishedSchema(tools, name), "projectRoot"), name).toBe(false);
+  }
+
   expect(browserRuntime.startBrowser).not.toHaveBeenCalled();
 });
 

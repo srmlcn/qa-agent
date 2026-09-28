@@ -7,7 +7,6 @@ const schema = z.object({
   flowIds: z.array(z.string().min(1)).min(1),
   workers: z.number().int().positive().optional(),
   authStrategy: z.enum(["shared", "per-worker"]).optional(),
-  projectRoot: z.string().min(1).optional(),
 });
 
 export const tool = {
@@ -16,7 +15,7 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<SuiteResult> {
     const input = schema.parse(args);
-    const projectRoot = input.projectRoot ?? process.cwd();
+    const projectRoot = process.cwd();
     return executeSuite({
       flowIds: input.flowIds,
       authStrategy: input.authStrategy ?? "shared",

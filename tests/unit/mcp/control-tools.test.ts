@@ -64,14 +64,15 @@ test("qa.repair_flow maps a product failure to the original run id", async () =>
     runId: "run-1",
   });
 
-  const output = await repairFlowTool.handler({
-    flowId: "project.archive",
-    failedStepId: "confirm-archive",
-    runId: "run-1",
-    projectRoot,
-    cookies: "secret-cookie",
-    client: { act: true },
-  });
+  const output = await withCwd(projectRoot, () =>
+    repairFlowTool.handler({
+      flowId: "project.archive",
+      failedStepId: "confirm-archive",
+      runId: "run-1",
+      cookies: "secret-cookie",
+      client: { act: true },
+    }),
+  );
 
   expect(repairFlow).toHaveBeenCalledTimes(1);
   const called = vi.mocked(repairFlow).mock.calls[0]?.[0];
@@ -119,12 +120,13 @@ test("qa.repair_flow maps a replay failure to the original run id", async () => 
     },
   });
 
-  const output = await repairFlowTool.handler({
-    flowId: "project.archive",
-    failedStepId: "confirm-archive",
-    runId: "run-1",
-    projectRoot,
-  });
+  const output = await withCwd(projectRoot, () =>
+    repairFlowTool.handler({
+      flowId: "project.archive",
+      failedStepId: "confirm-archive",
+      runId: "run-1",
+    }),
+  );
 
   expect(output).toEqual({ repaired: false, runId: "run-1" });
   expect(output).not.toHaveProperty("repairRunId");
@@ -153,12 +155,13 @@ test("qa.repair_flow returns the flow when repair succeeds", async () => {
     },
   });
 
-  const output = await repairFlowTool.handler({
-    flowId: "project.archive",
-    failedStepId: "confirm-archive",
-    runId: "run-1",
-    projectRoot,
-  });
+  const output = await withCwd(projectRoot, () =>
+    repairFlowTool.handler({
+      flowId: "project.archive",
+      failedStepId: "confirm-archive",
+      runId: "run-1",
+    }),
+  );
 
   expect(output).toEqual({ repaired: true, runId: "run-1", flow });
   expect(output).not.toHaveProperty("repairRunId");
@@ -167,26 +170,26 @@ test("qa.repair_flow returns the flow when repair succeeds", async () => {
 test("omitting runId or failedStepId throws and does not call repairFlow", async () => {
   const projectRoot = createProjectRoot();
 
-  await expect(
-    repairFlowTool.handler({
-      flowId: "project.archive",
-      failedStepId: "confirm-archive",
-      projectRoot,
-    }),
-  ).rejects.toEqual(
-    expect.objectContaining({
-      code: "FLOW_VALIDATION_FAILED",
-      message: "run not found",
-    }),
-  );
+  await withCwd(projectRoot, async () => {
+    await expect(
+      repairFlowTool.handler({
+        flowId: "project.archive",
+        failedStepId: "confirm-archive",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "FLOW_VALIDATION_FAILED",
+        message: "run not found",
+      }),
+    );
 
-  await expect(
-    repairFlowTool.handler({
-      flowId: "project.archive",
-      runId: "run-1",
-      projectRoot,
-    }),
-  ).rejects.toBeInstanceOf(QaError);
+    await expect(
+      repairFlowTool.handler({
+        flowId: "project.archive",
+        runId: "run-1",
+      }),
+    ).rejects.toBeInstanceOf(QaError);
+  });
 
   expect(repairFlow).not.toHaveBeenCalled();
   expect(browserRuntime.startBrowser).not.toHaveBeenCalled();
@@ -208,13 +211,14 @@ test("qa.capture_auth returns the profile and does not return cookies", async ()
     profile: "owner",
   });
 
-  const output = await captureAuthTool.handler({
-    projectId: "demo-app",
-    profile: "owner",
-    startUrl: "http://localhost:3000/login",
-    projectRoot,
-    cookies: [{ name: "session", value: "secret-cookie" }],
-  });
+  const output = await withCwd(projectRoot, () =>
+    captureAuthTool.handler({
+      projectId: "demo-app",
+      profile: "owner",
+      startUrl: "http://localhost:3000/login",
+      cookies: [{ name: "session", value: "secret-cookie" }],
+    }),
+  );
 
   expect(captureProfile).toHaveBeenCalledTimes(1);
   const called = vi.mocked(captureProfile).mock.calls[0]?.[0];
@@ -241,6 +245,16 @@ function readToolSource(filename: string): string {
     fileURLToPath(new URL(`../../../src/mcp/tools/${filename}`, import.meta.url)),
     "utf8",
   );
+}
+
+async function withCwd<T>(directory: string, run: () => Promise<T>): Promise<T> {
+  const previous = process.cwd();
+  process.chdir(directory);
+  try {
+    return await run();
+  } finally {
+    process.chdir(previous);
+  }
 }
 
 function createProjectRoot(): string {
