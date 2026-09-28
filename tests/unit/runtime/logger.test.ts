@@ -1,6 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { createLogger } from "../../../src/runtime/logger.js";
 
@@ -47,4 +57,47 @@ test("optional file sink stays under the logs directory", () => {
   const contents = readFileSync(filePath, "utf8");
   expect(filePath.startsWith(`${home}/`)).toBe(true);
   expect(contents).toContain("info wrote evidence");
+});
+
+test("names that resolve to the logs directory are rejected when the logger is created", () => {
+  const home = mkdtempSync(join(tmpdir(), "autonomous-qa-logs-"));
+  homes.push(home);
+  process.env.AUTONOMOUS_QA_HOME = home;
+  const logs = resolve(join(home, "logs"));
+
+  const names = [".", "./.", "foo/..", "nested/child/../.."];
+  for (const fileName of names) {
+    expect(resolve(join(logs, fileName))).toBe(logs);
+    expect(() => createLogger({ fileName })).toThrow(
+      new Error(`Invalid log file name: ${fileName}`),
+    );
+  }
+});
+
+test("a symlink log file is not followed and the write stays inside logs", () => {
+  const home = mkdtempSync(join(tmpdir(), "autonomous-qa-logs-"));
+  const outside = mkdtempSync(join(tmpdir(), "autonomous-qa-outside-"));
+  homes.push(home, outside);
+  process.env.AUTONOMOUS_QA_HOME = home;
+
+  const logs = join(home, "logs");
+  mkdirSync(logs, { recursive: true });
+  const outsideFile = join(outside, "secret.txt");
+  writeFileSync(outsideFile, "original-secret");
+  chmodSync(outsideFile, 0o644);
+  const linkPath = join(logs, "runtime.log");
+  symlinkSync(outsideFile, linkPath);
+
+  const logger = createLogger({ fileName: "runtime.log" });
+  logger.info("wrote evidence");
+
+  expect(readFileSync(outsideFile, "utf8")).toBe("original-secret");
+  expect(lstatSync(outsideFile).mode & 0o777).toBe(0o644);
+
+  const info = lstatSync(linkPath);
+  expect(info.isSymbolicLink()).toBe(false);
+  expect(info.isFile()).toBe(true);
+  expect(info.mode & 0o777).toBe(0o600);
+  expect(realpathSync(linkPath).startsWith(`${resolve(logs)}${sep}`)).toBe(true);
+  expect(readFileSync(linkPath, "utf8")).toContain("info wrote evidence");
 });
