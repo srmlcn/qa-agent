@@ -215,7 +215,7 @@ type NameValue = {
  * the saved archive is rewritten the same way. When the archive cannot be
  * rewritten, secret-bearing network entries are omitted instead.
  */
-function redactSavedTrace(
+export function redactSavedTrace(
   filePath: string,
   headerNames: readonly string[] | undefined,
 ): void {
@@ -246,7 +246,7 @@ function entriesWithoutSecrets(
     if (isSecretNetworkEntry(entry.name)) {
       continue;
     }
-    if (isBinaryPayload(entry.data)) {
+    if (isBinaryPayload(entry.name, entry.data)) {
       kept.push(entry);
       continue;
     }
@@ -275,7 +275,7 @@ function sanitizeEntry(
   data: Buffer,
   headerNames: readonly string[] | undefined,
 ): Buffer {
-  if (name.endsWith("/") || isBinaryPayload(data)) {
+  if (name.endsWith("/") || isBinaryPayload(name, data)) {
     return data;
   }
   const text = data.toString("utf8");
@@ -463,14 +463,52 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isBinaryPayload(data: Buffer): boolean {
-  const scan = Math.min(data.length, 4096);
-  for (let index = 0; index < scan; index += 1) {
-    if (data[index] === 0) {
-      return true;
-    }
+const BINARY_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "ico",
+  "bmp",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+  "wasm",
+  "pdf",
+  "mp4",
+  "webm",
+  "mp3",
+  "zip",
+  "gz",
+]);
+
+/**
+ * A NUL scan misses binary resources whose first bytes are not zero.
+ * Decoding those as UTF-8 replaces invalid sequences and corrupts the entry.
+ * Known binary extensions and any byte sequence that is not UTF-8 stay as-is.
+ */
+function isBinaryPayload(name: string, data: Buffer): boolean {
+  if (BINARY_EXTENSIONS.has(extensionOf(name))) {
+    return true;
   }
-  return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(data);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function extensionOf(name: string): string {
+  const base = name.slice(name.lastIndexOf("/") + 1);
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) {
+    return "";
+  }
+  return base.slice(dot + 1).toLowerCase();
 }
 
 function replaceFile(filePath: string, bytes: Buffer): void {

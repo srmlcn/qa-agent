@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
+import { redactSavedTrace } from "../../evidence/traces.js";
 import { QaError, type QaErrorJson } from "../../errors/qa-error.js";
 import { redactCookies, redactHeaders } from "../../security/redaction.js";
 import type { McpTool } from "../load-tools.js";
@@ -46,6 +47,11 @@ export type DebugSession = {
   context: DebugBrowserContext;
   network?: readonly DebugNetworkEvent[];
   console?: readonly DebugConsoleEvent[];
+  /**
+   * Active project `security.redactHeaders`.
+   * When omitted, header redaction keeps the default name list.
+   */
+  redactHeaders?: readonly string[];
 };
 
 let activeSession: DebugSession | undefined;
@@ -149,6 +155,7 @@ async function saveTrace(): Promise<unknown> {
   const filePath = artifactFile(session.artifactDir, TRACE_FILE);
   mkdirSync(session.artifactDir, { recursive: true });
   await session.context.tracing.stop({ path: filePath });
+  redactSavedTrace(filePath, session.redactHeaders);
   return { trace: TRACE_FILE };
 }
 

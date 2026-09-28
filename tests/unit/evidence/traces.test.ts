@@ -19,6 +19,10 @@ const SET_COOKIE_SECRET = "trace-set-cookie-secret-9f3a";
 const AUTH_SECRET = "trace-auth-secret-9f3a";
 const CUSTOM_SECRET = "trace-custom-secret-9f3a";
 const ACCEPT_MARKER = "keep-me-accept-9f3a";
+/** Invalid UTF-8 and no NUL, so a null-byte scan would rewrite it as text. */
+const BINARY_RESOURCE = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xd8,
+]);
 
 const secrets = [COOKIE_SECRET, SET_COOKIE_SECRET, AUTH_SECRET];
 
@@ -37,6 +41,8 @@ test("a saved trace.zip omits cookie, authorization, and configured header secre
   for (const secret of [...secrets, CUSTOM_SECRET]) {
     expect(before.includes(Buffer.from(secret))).toBe(true);
   }
+  expect(BINARY_RESOURCE.includes(0)).toBe(false);
+  expect(before.includes(BINARY_RESOURCE)).toBe(true);
 
   const saved = await saveTrace(planted, [
     "authorization",
@@ -59,6 +65,7 @@ test("a saved trace.zip omits cookie, authorization, and configured header secre
   expect(text.includes(Buffer.from("session"))).toBe(true);
   expect(text.includes(Buffer.from("<h1>kept</h1>"))).toBe(true);
   expect(text.includes(Buffer.from("screencast/frame.jpeg"))).toBe(true);
+  expect(text.includes(BINARY_RESOURCE)).toBe(true);
 });
 
 test("default header redaction keeps an unconfigured header value", async () => {
@@ -221,6 +228,10 @@ function requestTraceZip(): Buffer {
     {
       name: "resources/body.html",
       data: "<h1>kept</h1>",
+    },
+    {
+      name: "resources/pixel.dat",
+      data: BINARY_RESOURCE,
     },
     {
       name: "screencast/frame.jpeg",
