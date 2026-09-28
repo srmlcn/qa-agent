@@ -7,7 +7,7 @@ import { readProfile, saveProfile, type StorageState } from "../../../src/auth/s
 const COOKIE_VALUE = "example-cookie-value";
 
 type TraceEvent =
-  | { op: "open"; flags: string | number | undefined; fd: number }
+  | { op: "open"; path: string; flags: string | number | undefined; fd: number }
   | { op: "fstat"; fd: number }
   | { op: "read"; target: string | number };
 
@@ -25,7 +25,7 @@ vi.mock("node:fs", async (importOriginal) => {
       mode?: Parameters<typeof actual.openSync>[2],
     ): number {
       const fd = actual.openSync(path, flags, mode);
-      trace.push({ op: "open", flags, fd });
+      trace.push({ op: "open", path: String(path), flags, fd });
       return fd;
     },
     fstatSync(fd: number): ReturnType<typeof actual.fstatSync> {
@@ -71,12 +71,42 @@ test("readProfile opens the file once and checks that descriptor before reading"
   expect(readProfile("billing", "admin")).toEqual(sampleState());
 
   const opens = trace.filter((event) => event.op === "open");
-  expect(opens).toHaveLength(1);
-  const opened = opens[0];
+  const leafOpens = opens.filter(
+    (event) => event.op === "open" && event.path.endsWith("/admin.json"),
+  );
+  expect(leafOpens).toHaveLength(1);
+  const opened = leafOpens[0];
   if (opened?.op !== "open") {
     throw new Error("profile was not opened");
   }
-  expect(opened.flags).toBe(constants.O_RDONLY | constants.O_NOFOLLOW);
+  expect(opened.flags).toBe(
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  expect(opened.path.startsWith("/proc/self/fd/")).toBe(true);
+
+  const parentOpens = opens.filter(
+    (event) =>
+      event.op === "open" &&
+      event.path.startsWith("/proc/self/fd/") &&
+      !event.path.endsWith("/admin.json"),
+  );
+  expect(parentOpens.length).toBeGreaterThan(0);
+  for (const parent of parentOpens) {
+    if (parent.op !== "open" || typeof parent.flags !== "number") {
+      throw new Error("parent directory was not opened");
+    }
+    expect(parent.flags & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW);
+    expect(parent.flags & constants.O_DIRECTORY).toBe(constants.O_DIRECTORY);
+    expect(parent.flags & constants.O_NONBLOCK).toBe(constants.O_NONBLOCK);
+  }
+  expect(
+    opens.some(
+      (event) =>
+        event.op === "open" &&
+        event.path.includes("/auth/billing/admin.json") &&
+        !event.path.startsWith("/proc/self/fd/"),
+    ),
+  ).toBe(false);
 
   const fstatAt = trace.findIndex((event) => event.op === "fstat");
   const readAt = trace.findIndex((event) => event.op === "read");
