@@ -51,12 +51,15 @@ test("tools/list includes the read tools", async () => {
   const listed = await client.listTools();
   const names = listed.tools.map((tool) => tool.name).sort();
   expect(names).toEqual([
+    "qa.cancel_run",
+    "qa.capture_auth",
     "qa.discover_flow",
     "qa.execute_flow",
     "qa.execute_suite",
     "qa.get_run",
     "qa.list_flows",
     "qa.ping",
+    "qa.repair_flow",
     "qa.status",
   ]);
 });
