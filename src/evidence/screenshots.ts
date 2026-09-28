@@ -1,4 +1,14 @@
-import { lstatSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Page } from "playwright";
@@ -32,8 +42,117 @@ export async function screenshotAfter(
   assertStepFileName(stepId);
   const filePath = assertArtifactPath(join(destDir, `${stepId}.png`));
   mkdirSync(dirname(filePath), { recursive: true });
-  await page.screenshot({ path: filePath, type: "png" });
+  const bytes = await page.screenshot({ type: "png" });
+  writeScreenshotBytes(filePath, bytes);
   return filePath;
+}
+
+/**
+ * Writes `bytes` at `filePath` without following a symlink.
+ * POSIX opens with O_CREAT|O_EXCL|O_NOFOLLOW. Windows does not enforce
+ * O_NOFOLLOW, so the destination and its nearest existing ancestor are
+ * lstat'd immediately before the open. After the write, the real path must
+ * still sit inside the artifact directory and outside the auth home.
+ */
+function writeScreenshotBytes(filePath: string, bytes: Buffer): void {
+  const resolved = resolve(filePath);
+  const fd = openScreenshotExclusive(resolved);
+  try {
+    if (isSymbolicLink(resolved) || !fstatSync(fd).isFile()) {
+      throw artifactBlocked("Refusing a symlinked artifact path");
+    }
+    writeAll(fd, bytes);
+  } catch (error) {
+    closeScreenshot(fd);
+    removeCreatedFile(resolved);
+    throw error;
+  }
+  closeScreenshot(fd);
+  try {
+    assertRealArtifactLocation(resolved);
+  } catch (error) {
+    removeCreatedFile(resolved);
+    throw error;
+  }
+}
+
+function openScreenshotExclusive(resolved: string): number {
+  refuseSymlinkBeforeWrite(resolved);
+  try {
+    return openSync(resolved, exclusiveNoFollowFlags());
+  } catch (error) {
+    if (isFollowedSymlink(error, resolved)) {
+      throw artifactBlocked("Refusing a symlinked artifact path");
+    }
+    throw error;
+  }
+}
+
+function exclusiveNoFollowFlags(): number {
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  return constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow;
+}
+
+/**
+ * O_NOFOLLOW is not enforced on Windows. Refuse a symlink at the destination
+ * or its nearest existing ancestor, and do not open anything except a
+ * missing path or a regular file.
+ */
+function refuseSymlinkBeforeWrite(resolved: string): void {
+  if (pathExists(resolved)) {
+    const stat = lstatSync(resolved);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw artifactBlocked("Refusing a symlinked artifact path");
+    }
+  }
+  const ancestor = nearestExistingAncestor(
+    pathExists(resolved) ? dirname(resolved) : resolved,
+  );
+  if (isSymbolicLink(ancestor)) {
+    throw artifactBlocked("Refusing a symlinked artifact path");
+  }
+}
+
+function isFollowedSymlink(error: unknown, resolved: string): boolean {
+  if (isErrno(error, "ELOOP")) {
+    return true;
+  }
+  return isErrno(error, "EEXIST") && isSymbolicLink(resolved);
+}
+
+function writeAll(fd: number, bytes: Buffer): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(fd, bytes, offset, bytes.length - offset);
+    if (written <= 0) {
+      throw new Error("Screenshot write made no progress");
+    }
+    offset += written;
+  }
+}
+
+function closeScreenshot(fd: number): void {
+  try {
+    closeSync(fd);
+  } catch (error) {
+    if (!isErrno(error, "EBADF")) {
+      throw error;
+    }
+  }
+}
+
+function removeCreatedFile(filePath: string): void {
+  try {
+    if (lstatSync(filePath).isSymbolicLink()) {
+      return;
+    }
+    unlinkSync(filePath);
+  } catch (error) {
+    if (isEnoent(error)) {
+      return;
+    }
+    throw error;
+  }
 }
 
 function isListed(evidence: FlowSpec["evidence"], stepId: string): boolean {
@@ -216,7 +335,11 @@ function artifactBlocked(message: string): QaError {
 }
 
 function isEnoent(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
+  return isErrno(error, "ENOENT");
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 function containsCookieJar(filePath: string): boolean {
