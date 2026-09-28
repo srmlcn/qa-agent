@@ -180,7 +180,6 @@ async function teardown(
   if (!finished) {
     killBrowserProcess(browser);
     await finishedWithin(pending, CLOSE_KILL_GRACE_MS);
-    return;
   }
   if (isConnected(browser)) {
     throw new QaError({
