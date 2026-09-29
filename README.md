@@ -62,9 +62,11 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
    Reload Cursor after install. Cloud agents do not read `~/.cursor/mcp.json`.
 
-2. In each repo, create project files with `autonomous-qa init` or `node dist/cli/main.js init`. Init writes `.autonomous-qa/config.yml` and `.autonomous-qa/flows/`. It appends `.gitignore` entries for `.autonomous-qa/artifacts/` and `.autonomous-qa/runtime/`. It does not ignore `.autonomous-qa/flows/` or `.autonomous-qa/config.yml`. When `~/.autonomous-qa/config.json` already has a complete `llm` block, init omits `llm` from the project file so the user settings apply.
+2. Open any repo. Global settings apply without writing `.cursor` or `.autonomous-qa`. The built-in application defaults are `baseUrl: http://localhost:3000`, `allowedHosts: [localhost]`, and `productionAllowed: false`. Flows and artifacts for a repo that has no `.autonomous-qa` directory are stored in `~/.autonomous-qa/projects/<project-id>/`.
 
-3. Set `application.baseUrl` and `application.allowedHosts` in `.autonomous-qa/config.yml`. Those fields, `productionAllowed`, and destructive-action policy stay in the repo. User config cannot override them. A user `llm` field overrides the same field in the project file. `apiKeyEnv` is the name of an environment variable. The key value lives in the environment or `~/.autonomous-qa/env`, not in either config file.
+3. Add `.autonomous-qa/config.yml` only when that repo must override a global key or commit flows. A key in the repo file replaces the same global key. Omitted keys stay global. `allowedHosts`, `productionAllowed`, and `security` cannot be set in the user config. A repo `allowedHosts` list replaces the default list. `apiKeyEnv` is the name of an environment variable. The key value lives in the environment or `~/.autonomous-qa/env`, not in either config file.
+
+   `autonomous-qa init` or `node dist/cli/main.js init` creates the repo directory, the flows directory, and gitignore entries for `.autonomous-qa/artifacts/` and `.autonomous-qa/runtime/`. It does not ignore `.autonomous-qa/flows/` or `.autonomous-qa/config.yml`. When the user `llm` block is already complete, init omits `llm` from the project file. `--install-mcp` is the explicit way to write a project MCP server.
 
 4. The user MCP server is:
 
@@ -90,4 +92,4 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
 8. `qa.repair_flow` repairs a stale flow only for that locator failure. Assertion failures are not repaired.
 
-9. `.autonomous-qa/flows` and `.autonomous-qa/config.yml` are committable. Auth profiles and `.autonomous-qa/artifacts` are not.
+9. When a repo has `.autonomous-qa`, its `flows` and `config.yml` are committable. Auth profiles and artifacts are not. Artifacts in a bare repo stay under the home project directory.
