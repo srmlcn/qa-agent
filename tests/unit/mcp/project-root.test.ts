@@ -81,15 +81,25 @@ test("several configured roots are listed and not guessed", async () => {
   expect(error.message).toContain(second);
 });
 
-test("several roots without a config file are listed", async () => {
+test("several roots without an override directory require projectRoot", async () => {
   const first = createDir("qa-root-none-a-");
   const second = createDir("qa-root-none-b-");
   setRootLister(async () => [first, second]);
 
   const error = await rejectedRoot(undefined);
-  expect(error.message).toContain("No workspace root contains .autonomous-qa/config.yml");
+  expect(error.message).toContain("No workspace root contains .autonomous-qa");
+  expect(error.message).not.toContain("config.yml");
   expect(error.message).toContain(first);
   expect(error.message).toContain(second);
+});
+
+test("several roots resolve to the one override directory without a config file", async () => {
+  const first = createDir("qa-root-dir-a-");
+  const second = createDir("qa-root-dir-b-");
+  mkdirSync(join(second, ".autonomous-qa"));
+  setRootLister(async () => [first, second]);
+
+  await expect(resolveProjectRoot(undefined)).resolves.toBe(second);
 });
 
 function createDir(prefix: string): string {

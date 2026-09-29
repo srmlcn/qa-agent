@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { loadProjectConfig } from "../config/load-project.js";
+import { loadEffectiveConfig } from "../config/effective.js";
 import { QA_ERROR_CODES } from "../errors/codes.js";
 import { QaError } from "../errors/qa-error.js";
 import { version } from "../index.js";
@@ -108,7 +108,7 @@ export async function createMcpServer(
 
 function debugToolsEnabled(projectRoot: string): boolean {
   try {
-    return loadProjectConfig(projectRoot).stagehand.debugTools;
+    return loadEffectiveConfig(projectRoot).config.stagehand.debugTools;
   } catch {
     // A missing or invalid project config leaves optional debug tools off.
     return false;
