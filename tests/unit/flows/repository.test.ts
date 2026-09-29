@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -43,8 +44,9 @@ test("save then list then read returns the same steps", () => {
   const flow = sampleFlow();
   save(projectRoot, flow);
 
-  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  const flowsDir = homeFlowsDir();
   const filePath = join(flowsDir, "project--archive.yml");
+  expect(existsSync(join(projectRoot, ".autonomous-qa"))).toBe(false);
   expect(readFileSync(filePath, "utf8")).toBe(stringifyFlow(flow, "yaml"));
   expect(existsSync(join(flowsDir, "project.archive.yml"))).toBe(false);
   expect(existsSync(join(flowsDir, "project", "archive.yml"))).toBe(false);
@@ -76,7 +78,7 @@ test("dotted and hyphenated flow ids round-trip in distinct files", () => {
   save(projectRoot, dotted);
   save(projectRoot, hyphenated);
 
-  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  const flowsDir = homeFlowsDir();
   expect(readdirSync(flowsDir).sort()).toEqual(["a--b--c.yml", "a--b__c.yml"]);
   expect(readFileSync(join(flowsDir, "a--b--c.yml"), "utf8")).toBe(
     stringifyFlow(dotted, "yaml"),
@@ -176,7 +178,7 @@ test("an existing file is replaced without leaving a temp file", () => {
   const updated = sampleFlow({ name: "Archive renamed" });
   save(projectRoot, updated);
 
-  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  const flowsDir = homeFlowsDir();
   expect(readdirSync(flowsDir)).toEqual(["project--archive.yml"]);
   expect(filesUnder(projectRoot).some((file) => file.endsWith(".tmp"))).toBe(
     false,
@@ -205,6 +207,29 @@ test("a missing flow throws FLOW_VALIDATION_FAILED with the id", () => {
   expect(caught).not.toMatchObject({ code: "ENOENT" });
 });
 
+test("an existing .autonomous-qa directory keeps flows in the repo", () => {
+  mkdirSync(join(projectRoot, ".autonomous-qa"));
+  const flow = sampleFlow();
+  save(projectRoot, flow);
+
+  const flowsDir = join(projectRoot, ".autonomous-qa", "flows");
+  expect(existsSync(join(flowsDir, "project--archive.yml"))).toBe(true);
+  expect(existsSync(homeFlowsDir())).toBe(false);
+  expect(read(projectRoot, flow.id)).toEqual(flow);
+});
+
+test("a symlinked home project directory is refused", () => {
+  const outside = join(scratch, "outside-flows");
+  mkdirSync(outside, { recursive: true });
+  const projectState = join(tempHome, "projects", "project");
+  mkdirSync(join(tempHome, "projects"), { recursive: true });
+  symlinkSync(outside, projectState);
+
+  expect(() => save(projectRoot, sampleFlow())).toThrow(QaError);
+  expect(readdirSync(outside)).toEqual([]);
+  expect(existsSync(join(projectRoot, ".autonomous-qa"))).toBe(false);
+});
+
 test("save refuses a project root inside the auth directory", () => {
   const authProject = join(tempHome, "auth", "proj");
   mkdirSync(authProject, { recursive: true });
@@ -213,6 +238,10 @@ test("save refuses a project root inside the auth directory", () => {
   expect(existsSync(join(authProject, ".autonomous-qa"))).toBe(false);
   expect(filesUnder(join(tempHome, "auth"))).toEqual([]);
 });
+
+function homeFlowsDir(): string {
+  return join(tempHome, "projects", "project", "flows");
+}
 
 function sampleFlow(overrides: Partial<FlowSpec> = {}): FlowSpec {
   return parseFlowSpec({

@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { QaError } from "../errors/qa-error.js";
 import { homeDir } from "../runtime/paths.js";
+import { resolveStateLocation } from "../runtime/state-root.js";
 import { flowSpecSchema, type FlowSpec } from "./schema.js";
 import { parseFlow, stringifyFlow } from "./serialize.js";
 
@@ -24,8 +25,6 @@ export type FlowSummary = {
   state: FlowSpec["state"];
   authProfile?: string;
 };
-
-const FLOWS_SEGMENTS = [".autonomous-qa", "flows"] as const;
 
 /**
  * Lists saved flows for a project.
@@ -78,7 +77,9 @@ export function read(projectRoot: string, id: string): FlowSpec {
 }
 
 /**
- * Writes a flow as YAML under `<projectRoot>/.autonomous-qa/flows`.
+ * Writes a flow as YAML under the project state directory.
+ * A repo that already has `.autonomous-qa` keeps flows there.
+ * Otherwise flows go to `~/.autonomous-qa/projects/<project-id>/flows`.
  * The serializer in `serialize.ts` produces the file contents.
  */
 export function save(projectRoot: string, flow: FlowSpec): void {
@@ -175,13 +176,14 @@ function isSinglePathSegment(filename: string): boolean {
 }
 
 function resolveFlowsDirectory(projectRoot: string): string {
-  const root = resolve(projectRoot);
-  const directory = resolve(root, ...FLOWS_SEGMENTS);
-  if (!isInside(root, directory)) {
+  const project = resolve(projectRoot);
+  assertProjectAllowsFlows(project);
+  const location = resolveStateLocation(project);
+  const directory = resolve(location.root, "flows");
+  if (!isInside(location.root, directory)) {
     throw flowValidationFailed("Invalid flows directory");
   }
-  assertProjectAllowsFlows(root);
-  assertExistingFlowAncestors(root, directory);
+  assertExistingFlowAncestors(location.containment, directory);
   assertNotUnderAuth(directory);
   return directory;
 }
@@ -207,23 +209,36 @@ function assertProjectAllowsFlows(root: string): void {
   }
 }
 
-function assertExistingFlowAncestors(root: string, directory: string): void {
+function assertExistingFlowAncestors(containment: string, directory: string): void {
+  const root = resolve(containment);
   const realRoot = existsSync(root) ? realpathSync(root) : root;
-  const parent = join(root, FLOWS_SEGMENTS[0]);
-  for (const candidate of [parent, directory]) {
-    if (!existsSync(candidate)) {
-      continue;
+  let current = directory;
+  while (isInside(root, current)) {
+    if (entryExists(current)) {
+      let realCandidate: string;
+      try {
+        realCandidate = realpathSync(current);
+      } catch {
+        throw flowValidationFailed("Flows directory escapes the project");
+      }
+      if (!isInside(realRoot, realCandidate)) {
+        throw flowValidationFailed("Flows directory escapes the project");
+      }
+      assertNotUnderAuth(realCandidate);
     }
-    const realCandidate = realpathSync(candidate);
-    if (!isInside(realRoot, realCandidate)) {
-      throw flowValidationFailed("Flows directory escapes the project");
+    if (current === root) {
+      break;
     }
-    assertNotUnderAuth(realCandidate);
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
   }
 }
 
 function assertRealFlowsDirectory(projectRoot: string, directory: string): void {
-  const root = resolve(projectRoot);
+  const root = resolveStateLocation(projectRoot).containment;
   let info: ReturnType<typeof lstatSync>;
   try {
     info = lstatSync(directory);
@@ -379,6 +394,18 @@ function isInside(parent: string, child: string): boolean {
   const root = resolve(parent);
   const target = resolve(child);
   return target === root || target.startsWith(`${root}${sep}`);
+}
+
+function entryExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (isEnoent(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function isEnoent(error: unknown): boolean {

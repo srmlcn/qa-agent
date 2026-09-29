@@ -70,7 +70,7 @@ beforeEach(() => {
   const scratch = mkdtempSync(join(tmpdir(), "aqa-repair-unit-"));
   scratchDirs.push(scratch);
   projectRoot = join(scratch, "project");
-  mkdirSync(projectRoot, { recursive: true });
+  mkdirSync(join(projectRoot, ".autonomous-qa"), { recursive: true });
   vi.mocked(startBrowser).mockClear();
   vi.mocked(validateFlow).mockClear();
 });
