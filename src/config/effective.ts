@@ -1,10 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parse, stringify } from "yaml";
 import { QaError } from "../errors/qa-error.js";
-import { loadProjectConfig, projectConfigPath } from "./load-project.js";
-import { loadUserConfig, type LoadedUserConfig } from "./load-user.js";
+import { builtinProjectDocument } from "./defaults.js";
+import { loadUserConfig, userConfigPath } from "./load-user.js";
+import {
+  projectConfigPath,
+  readOptionalProjectDocument,
+  validateProjectDocument,
+} from "./load-project.js";
+import { projectIdFromRoot } from "./project-id.js";
 import { applicationSchema, type ProjectConfig } from "./schema.js";
 
 export type EffectiveConfigOverrides = {
@@ -20,8 +22,9 @@ export type EffectiveConfigResult = {
 
 /**
  * Loads one effective config.
- * Precedence, highest first: caller `application.baseUrl`, user LLM fields,
- * project config, then defaults from `defaults.ts` via `loadProjectConfig`.
+ * Precedence, highest first: caller `application.baseUrl`, keys in the repo
+ * file, keys in the user config, then built-in defaults.
+ * A missing repo file is a repo with no local overrides.
  * User `security`, `application.productionAllowed`, and `application.allowedHosts`
  * are ignored. Their names are returned in `warnings`. The API key value is never loaded.
  */
@@ -30,8 +33,16 @@ export function loadEffectiveConfig(
   overrides?: EffectiveConfigOverrides,
 ): EffectiveConfigResult {
   const user = loadUserConfig();
+  const project = readOptionalProjectDocument(projectRoot);
+  const defaults = builtinProjectDocument(projectIdFromRoot(projectRoot));
+  const merged = project === undefined
+    ? mergeLayers(defaults, user.overlay)
+    : mergeLayers(mergeLayers(defaults, user.overlay), project);
+  const filePath = project === undefined
+    ? userConfigPath()
+    : projectConfigPath(projectRoot);
   const config = applyBaseUrlOverride(
-    loadProjectLayer(projectRoot, user.llm),
+    validateProjectDocument(merged, filePath),
     overrides,
   );
   return {
@@ -40,102 +51,27 @@ export function loadEffectiveConfig(
   };
 }
 
-function loadProjectLayer(
-  projectRoot: string,
-  userLlm: LoadedUserConfig["llm"],
-): ProjectConfig {
-  if (Object.keys(userLlm).length === 0) {
-    return loadProjectConfig(projectRoot);
+/**
+ * Later layer wins per key. Nested config objects merge.
+ * Arrays and `headers` replace the whole value, matching a single git key.
+ */
+function mergeLayers(
+  base: Record<string, unknown>,
+  overlay: unknown,
+): Record<string, unknown> {
+  if (!isPlainObject(overlay)) {
+    return base;
   }
-  const read = readProjectDocument(projectRoot);
-  if (!read.ok) {
-    return loadProjectConfig(projectRoot);
-  }
-  const merged = mergeUserLlm(read.document, userLlm);
-  if (!merged.changed) {
-    return loadProjectConfig(projectRoot);
-  }
-  return loadMergedDocument(projectRoot, merged.document);
-}
-
-function readProjectDocument(
-  projectRoot: string,
-): { ok: true; document: unknown } | { ok: false } {
-  let source: string;
-  try {
-    source = readFileSync(projectConfigPath(projectRoot), "utf8");
-  } catch {
-    return { ok: false };
-  }
-  try {
-    return { ok: true, document: toUnknown(parse(source)) };
-  } catch {
-    return { ok: false };
-  }
-}
-
-function mergeUserLlm(
-  document: unknown,
-  userLlm: LoadedUserConfig["llm"],
-): { document: unknown; changed: boolean } {
-  if (!isPlainObject(document)) {
-    return { document, changed: false };
-  }
-  if (document.llm !== undefined && !isPlainObject(document.llm)) {
-    return { document, changed: false };
-  }
-
-  const projectLlm = isPlainObject(document.llm) ? document.llm : undefined;
-  const llm: Record<string, unknown> =
-    projectLlm === undefined ? {} : { ...projectLlm };
-  let changed = false;
-  for (const [field, value] of Object.entries(userLlm)) {
-    if (value === undefined) {
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    const current = result[key];
+    if (key !== "headers" && isPlainObject(value) && isPlainObject(current)) {
+      result[key] = mergeLayers(current, value);
       continue;
     }
-    if (
-      projectLlm !== undefined &&
-      Object.hasOwn(projectLlm, field) &&
-      sameJsonValue(projectLlm[field], value)
-    ) {
-      continue;
-    }
-    llm[field] = value;
-    changed = true;
+    result[key] = value;
   }
-  if (!changed) {
-    return { document, changed: false };
-  }
-  return {
-    document: {
-      ...document,
-      llm,
-    },
-    changed: true,
-  };
-}
-
-function loadMergedDocument(projectRoot: string, document: unknown): ProjectConfig {
-  const tempRoot = mkdtempSync(join(tmpdir(), "qa-effective-"));
-  const tempConfigPath = projectConfigPath(tempRoot);
-  try {
-    mkdirSync(join(tempRoot, ".autonomous-qa"));
-    writeFileSync(tempConfigPath, stringify(document), "utf8");
-    return loadProjectConfig(tempRoot);
-  } catch (error: unknown) {
-    if (error instanceof QaError) {
-      throw new QaError({
-        code: error.code,
-        message: error.message.replaceAll(
-          tempConfigPath,
-          projectConfigPath(projectRoot),
-        ),
-      });
-    }
-    throw error;
-  } finally {
-    rmSync(tempRoot, { recursive: true, force: true });
-  }
+  return result;
 }
 
 function applyBaseUrlOverride(
@@ -168,14 +104,6 @@ function warningList(fields: readonly string[]): string[] {
     .map((field) => `Ignored user config field ${field}`);
 }
 
-function sameJsonValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toUnknown(value: unknown): unknown {
-  return value;
 }

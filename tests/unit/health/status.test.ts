@@ -92,21 +92,51 @@ test("a valid project returns configOk true", async () => {
   expect(JSON.parse(printed.stdout)).toEqual(health);
 });
 
-test("a missing project config is reported and does not fail a healthy user install", async () => {
+test("a missing project file loads global settings and does not fail a healthy user install", async () => {
   const root = createProject();
-  const configPath = projectConfigPath(root);
+  writeFileSync(
+    join(home, "config.json"),
+    JSON.stringify({
+      llm: {
+        provider: "openai-compatible",
+        model: "company-ui-agent",
+        baseUrl: "https://llm.company.internal/v1",
+        apiKeyEnv: API_KEY_ENV,
+        timeoutMs: 60000,
+      },
+    }),
+  );
+  markUserInstall();
+  stubInstalledChromium();
+  const health = collectHealth(root);
+
+  expect(health.configOk).toBe(true);
+  expect(health.userInstallOk).toBe(true);
+  expect(health.problems.some((problem) => problem.includes("Missing"))).toBe(false);
+  expect(health.problems).toContain(
+    `LLM API key environment variable ${API_KEY_ENV} is unset`,
+  );
+
+  const printed = await runDoctor(root);
+  expect(printed.code).toBe(0);
+  expect(JSON.parse(printed.stdout)).toEqual(health);
+  expect(printed.stdout).not.toContain(projectConfigPath(root));
+});
+
+test("incomplete global llm settings keep configOk false without failing the user install", async () => {
+  const root = createProject();
   markUserInstall();
   stubInstalledChromium();
   const health = collectHealth(root);
 
   expect(health.configOk).toBe(false);
   expect(health.userInstallOk).toBe(true);
-  expect(health.problems.some((problem) => problem.includes(configPath))).toBe(true);
+  expect(health.problems.some((problem) => problem.includes("config.json"))).toBe(true);
+  expect(health.problems.some((problem) => problem.includes("Missing"))).toBe(false);
 
   const printed = await runDoctor(root);
   expect(printed.code).toBe(0);
   expect(JSON.parse(printed.stdout)).toEqual(health);
-  expect(printed.stdout).toContain(configPath);
 });
 
 test("an unset API key is a problem and doctor still exits 0", async () => {

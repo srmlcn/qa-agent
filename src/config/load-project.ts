@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { parse } from "yaml";
 import { ZodError, type ZodIssue } from "zod";
 import { QaError } from "../errors/qa-error.js";
@@ -21,8 +21,34 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
   const filePath = projectConfigPath(projectRoot);
   const source = readConfigSource(filePath);
   const parsed = parseConfigYaml(source, filePath);
-  const withDefaults = applyProjectDefaults(parsed);
-  return validateConfig(withDefaults, filePath);
+  return validateProjectDocument(parsed, filePath);
+}
+
+/**
+ * Reads a repo config when the file exists.
+ * A missing file returns `undefined`. Invalid YAML throws `POLICY_BLOCKED`.
+ */
+export function readOptionalProjectDocument(projectRoot: string): unknown | undefined {
+  const filePath = projectConfigPath(projectRoot);
+  let source: string;
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch (error: unknown) {
+    if (isEnoent(error)) {
+      return undefined;
+    }
+    throw configError(unreadableConfigMessage(filePath));
+  }
+  const document = parseConfigYaml(source, filePath);
+  if (!isPlainObject(document)) {
+    throw configError(invalidConfigMessage(filePath, ["(root)"]));
+  }
+  return document;
+}
+
+/** Validates a merged document and names `filePath` in schema errors. */
+export function validateProjectDocument(input: unknown, filePath: string): ProjectConfig {
+  return validateConfig(applyProjectDefaults(input), filePath);
 }
 
 function readConfigSource(filePath: string): string {
@@ -77,7 +103,14 @@ function invalidConfigMessage(
 ): string {
   const listed = [...new Set(fields)].sort();
   const noun = listed.length === 1 ? "field" : "fields";
-  return `Invalid ${PROJECT_CONFIG_RELATIVE_PATH} at ${filePath}: ${noun} ${listed.join(", ")}`;
+  return `Invalid ${configLabel(filePath)} at ${filePath}: ${noun} ${listed.join(", ")}`;
+}
+
+function configLabel(filePath: string): string {
+  if (filePath.endsWith(`${sep}config.json`) || filePath.endsWith("/config.json")) {
+    return "config.json";
+  }
+  return PROJECT_CONFIG_RELATIVE_PATH;
 }
 
 function fieldNames(error: ZodError): string[] {
@@ -101,6 +134,10 @@ function issueFieldNames(issue: ZodIssue): string[] {
 
 function joinField(prefix: string, key: string): string {
   return prefix.length === 0 ? key : `${prefix}.${key}`;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isEnoent(error: unknown): boolean {

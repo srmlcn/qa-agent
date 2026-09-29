@@ -2,12 +2,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { loadEffectiveConfig } from "../../config/effective.js";
 import { loadUserConfig, userLlmIsComplete } from "../../config/load-user.js";
-import { PROJECT_ID_PATTERN } from "../../config/schema.js";
+import { projectIdFromDirectoryName } from "../../config/project-id.js";
 import { recordProjectRoot } from "../../runtime/project-registry.js";
 import type { Command } from "../types.js";
-
-const PROJECT_ID_MAX_LENGTH = 63;
-const FALLBACK_PROJECT_ID = "project";
 
 const GITIGNORE_ENTRIES = [
   ".autonomous-qa/artifacts/",
@@ -67,20 +64,6 @@ async function createProjectConfig(projectRoot: string): Promise<void> {
   const projectId = projectIdFromDirectoryName(basename(projectRoot));
   const includeLlm = !userLlmIsComplete(loadUserConfig().llm);
   await writeFile(configPath, renderProjectConfig(projectId, includeLlm), "utf8");
-}
-
-/**
- * Directory names are sanitized to the project id schema
- * `/^[a-z0-9][a-z0-9-]{0,62}$/`.
- */
-function projectIdFromDirectoryName(directoryName: string): string {
-  const hyphenated = directoryName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const trimmed = hyphenated.replace(/^-+/, "").replace(/-+$/, "");
-  const truncated = trimmed.slice(0, PROJECT_ID_MAX_LENGTH).replace(/-+$/, "");
-  if (PROJECT_ID_PATTERN.test(truncated)) {
-    return truncated;
-  }
-  return FALLBACK_PROJECT_ID;
 }
 
 function renderProjectConfig(projectId: string, includeLlm: boolean): string {
