@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { chromium } from "playwright";
@@ -16,6 +17,7 @@ export type HealthReport = {
   browserOk: boolean;
   llmOk: boolean;
   homeOk: boolean;
+  ffmpegAvailable: boolean;
   problems: string[];
 };
 
@@ -54,6 +56,8 @@ export function collectHealth(projectRoot: string): HealthReport {
     problems.push(home.problem);
   }
 
+  const ffmpegAvailable = ffmpegExecutableExists();
+
   return {
     packageVersion: version,
     nodeOk,
@@ -61,8 +65,18 @@ export function collectHealth(projectRoot: string): HealthReport {
     browserOk,
     llmOk,
     homeOk: home.ok,
+    ffmpegAvailable,
     problems,
   };
+}
+
+function ffmpegExecutableExists(): boolean {
+  try {
+    execSync("ffmpeg -version", { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type LoadedConfig =

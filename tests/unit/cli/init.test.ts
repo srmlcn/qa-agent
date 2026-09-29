@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { main } from "../../../src/cli/main.js";
 import { loadCommands } from "../../../src/cli/registry.js";
+import { EXPECTED_EVIDENCE_CAPTURE } from "../../../src/config/evidence-defaults.js";
 import { loadProjectConfig } from "../../../src/config/load-project.js";
 
 const GITIGNORE_ENTRIES = [
@@ -76,6 +77,7 @@ test("first run creates config and flows directory", async () => {
       console: true,
       trace: "on-failure",
       maxResponseBodyBytes: 262144,
+      ...EXPECTED_EVIDENCE_CAPTURE,
     },
     security: {
       redactHeaders: ["authorization", "cookie", "set-cookie"],

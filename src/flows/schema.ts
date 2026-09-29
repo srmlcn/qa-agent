@@ -101,6 +101,7 @@ function actionSchemas(identity: z.ZodRawShape) {
   return [
     actionSchema("goto", { value: z.string() }, identity),
     actionSchema("click", { locator: locatorSchema }, identity),
+    actionSchema("hover", { locator: locatorSchema }, identity),
     actionSchema(
       "fill",
       { locator: locatorSchema, value: z.string() },
@@ -251,6 +252,7 @@ const inputSchema = z
 const screenshotSchema = z
   .object({
     after: z.string().min(1),
+    showCursor: z.boolean().optional(),
   })
   .strict();
 

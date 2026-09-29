@@ -1,4 +1,13 @@
 import { z } from "zod";
+import {
+  DEFAULT_CURSOR_SHOW_ON_ACTIONS,
+  DEFAULT_FFMPEG_CRF,
+  DEFAULT_SCREENSHOT_LOAD_TIMEOUT_MS,
+  DEFAULT_SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS,
+  DEFAULT_SCREENSHOT_SETTLE_DELAY_MS,
+  DEFAULT_VIDEO_HEIGHT,
+  DEFAULT_VIDEO_WIDTH,
+} from "./evidence-defaults.js";
 import { DEFAULT_MAX_RUN_DURATION_MS } from "./defaults.js";
 
 /** Spec prose: project ids used in home-directory paths. */
@@ -10,6 +19,106 @@ export const LLM_PROVIDERS = ["openai-compatible", "openai"] as const;
 export const PLAYWRIGHT_BROWSERS = ["chromium"] as const;
 export const EVIDENCE_SCREENSHOT_MODES = ["checkpoints"] as const;
 export const EVIDENCE_TRACE_MODES = ["on-failure", "off"] as const;
+export const EVIDENCE_SCREENSHOT_LOAD_STATES = [
+  "load",
+  "domcontentloaded",
+  "networkidle",
+] as const;
+export const EVIDENCE_SCREENSHOT_ANIMATIONS = ["disabled", "allow"] as const;
+export const EVIDENCE_SCREENSHOT_CARET = ["hide", "initial"] as const;
+export const EVIDENCE_CURSOR_MODES = ["auto", "always", "never"] as const;
+export const CURSOR_SHOW_ON_ACTIONS = [
+  "hover",
+  "click",
+  "select",
+  "check",
+  "uncheck",
+  "drag",
+  "move",
+] as const;
+export const EVIDENCE_CURSOR_STYLES = ["native-arrow"] as const;
+export const EVIDENCE_FFMPEG_PRESETS = [
+  "ultrafast",
+  "superfast",
+  "veryfast",
+  "faster",
+  "fast",
+  "medium",
+  "slow",
+  "slower",
+  "veryslow",
+] as const;
+
+export const evidenceScreenshotOptionsSchema = z
+  .object({
+    waitForLoadState: z
+      .enum(EVIDENCE_SCREENSHOT_LOAD_STATES)
+      .default("networkidle"),
+    loadTimeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_SCREENSHOT_LOAD_TIMEOUT_MS),
+    networkIdleTimeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS),
+    settleDelayMs: z
+      .number()
+      .int()
+      .nonnegative()
+      .default(DEFAULT_SCREENSHOT_SETTLE_DELAY_MS),
+    animations: z.enum(EVIDENCE_SCREENSHOT_ANIMATIONS).default("disabled"),
+    caret: z.enum(EVIDENCE_SCREENSHOT_CARET).default("initial"),
+    fullPage: z.boolean().default(false),
+  })
+  .strict();
+
+export const evidenceCursorSchema = z
+  .object({
+    mode: z.enum(EVIDENCE_CURSOR_MODES).default("auto"),
+    showOnActions: z
+      .array(z.enum(CURSOR_SHOW_ON_ACTIONS))
+      .default([...DEFAULT_CURSOR_SHOW_ON_ACTIONS]),
+    showOnLocatorWait: z.boolean().default(true),
+    showOnFailure: z.boolean().default(true),
+    showOnLowSemanticLocator: z.boolean().default(true),
+    style: z.enum(EVIDENCE_CURSOR_STYLES).default("native-arrow"),
+  })
+  .strict();
+
+export const evidenceFfmpegSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    outputFormat: z.literal("mp4").default("mp4"),
+    crf: z.number().int().min(0).max(51).default(DEFAULT_FFMPEG_CRF),
+    preset: z.enum(EVIDENCE_FFMPEG_PRESETS).default("veryfast"),
+    keepSourceWebm: z.boolean().default(false),
+  })
+  .strict();
+
+export const evidenceVideoSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    size: z
+      .object({
+        width: z.number().int().positive().default(DEFAULT_VIDEO_WIDTH),
+        height: z.number().int().positive().default(DEFAULT_VIDEO_HEIGHT),
+      })
+      .strict()
+      .default({ width: DEFAULT_VIDEO_WIDTH, height: DEFAULT_VIDEO_HEIGHT }),
+    retainOnPass: z.boolean().default(false),
+    retainOnFailure: z.boolean().default(true),
+    ffmpeg: evidenceFfmpegSchema.default({
+      enabled: true,
+      outputFormat: "mp4",
+      crf: DEFAULT_FFMPEG_CRF,
+      preset: "veryfast",
+      keepSourceWebm: false,
+    }),
+  })
+  .strict();
 
 export const projectSchema = z
   .object({
@@ -62,6 +171,36 @@ export const evidenceSchema = z
     console: z.boolean(),
     trace: z.enum(EVIDENCE_TRACE_MODES),
     maxResponseBodyBytes: z.number().int().nonnegative(),
+    screenshotOptions: evidenceScreenshotOptionsSchema.default({
+      waitForLoadState: "networkidle",
+      loadTimeoutMs: DEFAULT_SCREENSHOT_LOAD_TIMEOUT_MS,
+      networkIdleTimeoutMs: DEFAULT_SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS,
+      settleDelayMs: DEFAULT_SCREENSHOT_SETTLE_DELAY_MS,
+      animations: "disabled",
+      caret: "initial",
+      fullPage: false,
+    }),
+    cursor: evidenceCursorSchema.default({
+      mode: "auto",
+      showOnActions: [...DEFAULT_CURSOR_SHOW_ON_ACTIONS],
+      showOnLocatorWait: true,
+      showOnFailure: true,
+      showOnLowSemanticLocator: true,
+      style: "native-arrow",
+    }),
+    video: evidenceVideoSchema.default({
+      enabled: false,
+      size: { width: DEFAULT_VIDEO_WIDTH, height: DEFAULT_VIDEO_HEIGHT },
+      retainOnPass: false,
+      retainOnFailure: true,
+      ffmpeg: {
+        enabled: true,
+        outputFormat: "mp4",
+        crf: DEFAULT_FFMPEG_CRF,
+        preset: "veryfast",
+        keepSourceWebm: false,
+      },
+    }),
   })
   .strict();
 

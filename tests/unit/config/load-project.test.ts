@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
+import { EXPECTED_EVIDENCE_CAPTURE } from "../../../src/config/evidence-defaults.js";
 import { loadProjectConfig } from "../../../src/config/load-project.js";
 import { QaError } from "../../../src/errors/qa-error.js";
 
@@ -96,6 +97,7 @@ test("the section 7 sample parses once project.id is added", () => {
       console: true,
       trace: "on-failure",
       maxResponseBodyBytes: 262144,
+      ...EXPECTED_EVIDENCE_CAPTURE,
     },
     security: {
       redactHeaders: ["authorization", "cookie", "set-cookie"],

@@ -78,6 +78,7 @@ export interface RunResult {
   artifacts: {
     screenshots: string[];
     trace?: string;
+    video?: string;
   };
   failure?: {
     stepId?: string;

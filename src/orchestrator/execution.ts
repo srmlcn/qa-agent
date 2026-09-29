@@ -1,8 +1,14 @@
+import { materializeEvidence } from "../config/materialize-evidence.js";
 import type { ProjectConfig } from "../config/schema.js";
 import { applyCapture } from "../evidence/console.js";
 import { startCapture, type CaptureSession } from "../evidence/network.js";
 import { startRun, type RunBuilder } from "../evidence/result.js";
 import { screenshotAfter } from "../evidence/screenshots.js";
+import {
+  finalizeVideo,
+  recordVideoDir,
+  shouldRecordVideo,
+} from "../evidence/video.js";
 import { attach, createRunDir, writeRun } from "../evidence/store.js";
 import { startTrace, stopTrace, type TraceMode } from "../evidence/traces.js";
 import type { RunResult } from "../evidence/types.js";
@@ -10,7 +16,7 @@ import { QaError } from "../errors/qa-error.js";
 import { readProfilePath } from "../auth/store.js";
 import { interpolateFlow, type FlowInputs } from "../flows/interpolate.js";
 import { read, save } from "../flows/repository.js";
-import type { FlowSpec } from "../flows/schema.js";
+import type { FlowSpec, Locator } from "../flows/schema.js";
 import { transition } from "../flows/state.js";
 import { runAction } from "../playwright/actions.js";
 import { runAssertion } from "../playwright/assertions.js";
@@ -63,7 +69,12 @@ type PreparedFlow = {
 export async function executeFlow(
   options: ExecuteFlowOptions,
 ): Promise<ExecuteFlowResult> {
-  const { runId, signal } = createRun(options.flowId);
+  const config: ProjectConfig = {
+    ...options.config,
+    evidence: materializeEvidence(options.config.evidence),
+  };
+  const runOptions: ExecuteFlowOptions = { ...options, config };
+  const { runId, signal } = createRun(runOptions.flowId);
   let session: BrowserSession | undefined;
   setOnCancel(runId, () => {
     if (session === undefined) {
@@ -75,22 +86,37 @@ export async function executeFlow(
   });
 
   try {
-    const prepared = prepareFlow(options);
+    const prepared = prepareFlow(runOptions);
+    const runDir = createRunDir(runOptions.projectRoot, runId);
+    const recordVideo = shouldRecordVideo(config.evidence.video)
+      ? {
+          dir: recordVideoDir(runDir),
+          size: config.evidence.video.size,
+        }
+      : undefined;
     session = await startBrowser({
-      browser: options.config.playwright.browser,
-      headless: options.headed !== true,
+      browser: config.playwright.browser,
+      headless: runOptions.headed !== true,
       timeoutMs: Math.max(
-        options.config.playwright.timeoutMs,
+        config.playwright.timeoutMs,
         MIN_LAUNCH_TIMEOUT_MS,
       ),
       signal,
       ...(prepared.storageState === undefined
         ? {}
         : { storageState: prepared.storageState }),
+      ...(recordVideo === undefined ? {} : { recordVideo }),
     });
-    const result = await runSession(options, prepared, session, runId, signal);
+    const result = await runSession(
+      runOptions,
+      prepared,
+      session,
+      runId,
+      signal,
+      runDir,
+    );
     complete(runId, result);
-    writeRun(options.projectRoot, result);
+    writeRun(runOptions.projectRoot, result);
     return { runId, result };
   } finally {
     await session?.close();
@@ -118,8 +144,8 @@ async function runSession(
   session: BrowserSession,
   runId: string,
   signal: AbortSignal,
+  runDir: string,
 ): Promise<RunResult> {
-  const runDir = createRunDir(options.projectRoot, runId);
   const capture = await startCapture(session.page, {
     evidence: {
       network: options.config.evidence.network,
@@ -144,6 +170,7 @@ async function runSession(
       options.config.playwright.timeoutMs,
       signal,
       runId,
+      options.config,
     );
     if (locatorFailed) {
       markStoredFlowStale(options.projectRoot, prepared.stored);
@@ -158,9 +185,16 @@ async function runSession(
       mode: traceModeFor(options),
     });
     tracing = false;
+    const video = await collectVideoArtifact(
+      session,
+      runDir,
+      options.config.evidence.video,
+      result.status === "passed",
+    );
     attach(result, {
       screenshots,
       ...(trace === undefined ? {} : { trace }),
+      ...(video === undefined ? {} : { video }),
     });
     return result;
   } finally {
@@ -216,6 +250,7 @@ async function runSteps(
   timeoutMs: number,
   signal: AbortSignal,
   runId: string,
+  config: ProjectConfig,
 ): Promise<boolean> {
   let locatorFailed = false;
   for (const step of flow.steps) {
@@ -231,6 +266,7 @@ async function runSteps(
         stepId,
         runDir,
         flow.evidence,
+        captureContext(config, step, false),
       );
       if (shot !== undefined) {
         screenshots.push(shot);
@@ -245,6 +281,16 @@ async function runSteps(
         ? cancelledStep(signal, stepId, runId, flow.id)
         : asQaError(error, stepId, runId, flow.id);
       builder.stepFailed(stepId, qaError);
+      const failureShot = await screenshotAfter(
+        session.page,
+        stepId,
+        runDir,
+        flow.evidence,
+        captureContext(config, step, true),
+      );
+      if (failureShot !== undefined) {
+        screenshots.push(failureShot);
+      }
       if (qaError.code === "LOCATOR_STALE") {
         locatorFailed = true;
       }
@@ -344,6 +390,50 @@ function gotoValues(flow: FlowSpec): string[] {
  * Zod's inferred step union keeps `action` and drops the other fields.
  * The stored object still has `id` and `value` at runtime.
  */
+async function collectVideoArtifact(
+  session: BrowserSession,
+  destDir: string,
+  plan: ProjectConfig["evidence"]["video"],
+  runPassed: boolean,
+): Promise<string | undefined> {
+  if (!plan.enabled) {
+    return undefined;
+  }
+  await session.page.close();
+  await session.context.close();
+  const finalized = await finalizeVideo({
+    context: session.context,
+    page: session.page,
+    destDir,
+    plan,
+    runPassed,
+  });
+  return finalized.path;
+}
+
+function captureContext(
+  config: ProjectConfig,
+  step: FlowSpec["steps"][number],
+  isFailure: boolean,
+): {
+  projectEvidence: ProjectConfig["evidence"];
+  stepAction: string;
+  stepLocator?: Locator;
+  isFailure: boolean;
+} {
+  return {
+    projectEvidence: config.evidence,
+    stepAction: step.action,
+    stepLocator: stepLocatorOf(step),
+    isFailure,
+  };
+}
+
+function stepLocatorOf(step: FlowSpec["steps"][number]): Locator | undefined {
+  const locator = (step as { locator?: Locator }).locator;
+  return locator;
+}
+
 function stepIdOf(step: FlowSpec["steps"][number]): string {
   const id = (step as { id?: unknown }).id;
   return typeof id === "string" && id.length > 0 ? id : "step";

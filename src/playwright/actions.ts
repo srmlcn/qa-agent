@@ -12,6 +12,7 @@ type RunnableStep =
   | { id: string; action: "goto"; value: string }
   | { id: string; action: "reload" }
   | { id: string; action: "click"; locator: FlowLocator }
+  | { id: string; action: "hover"; locator: FlowLocator }
   | { id: string; action: "fill"; locator: FlowLocator; value: string }
   | { id: string; action: "press"; locator: FlowLocator; value: string }
   | { id: string; action: "select"; locator: FlowLocator; value: string }
@@ -69,6 +70,9 @@ async function performAction(
       return;
     case "click":
       await toLocator(page, step.locator).click({ timeout: timeoutMs });
+      return;
+    case "hover":
+      await toLocator(page, step.locator).hover({ timeout: timeoutMs });
       return;
     case "fill":
       await toLocator(page, step.locator).fill(step.value, {
