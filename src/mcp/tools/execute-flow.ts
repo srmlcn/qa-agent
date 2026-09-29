@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { loadProjectConfig } from "../../config/load-project.js";
+import { loadToolConfig } from "../project-root.js";
 import type { RunResult } from "../../evidence/types.js";
 import { executeFlow } from "../../orchestrator/execution.js";
 import type { McpTool } from "../load-tools.js";
@@ -12,6 +12,7 @@ const schema = z.object({
   authProfile: z.string().min(1).optional(),
   headed: z.boolean().optional().default(false),
   collectTrace: z.boolean().optional(),
+  projectRoot: z.string().min(1).optional(),
 });
 
 export type ExecuteFlowToolResult = {
@@ -27,12 +28,12 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<ExecuteFlowToolResult> {
     const input = schema.parse(args);
-    const projectRoot = process.cwd();
+    const { projectRoot, config } = await loadToolConfig(input.projectRoot);
     const executed = await executeFlow({
       flowId: input.flowId,
       inputs: input.inputs,
       projectRoot,
-      config: loadProjectConfig(projectRoot),
+      config,
       headed: input.headed,
       ...(input.authProfile === undefined
         ? {}

@@ -133,8 +133,10 @@ test("qa.status does not include a fixture API key from the environment", async 
   const projectRoot = createProjectRoot();
   writeProjectConfig(projectRoot);
   const previousHome = process.env.AUTONOMOUS_QA_HOME;
+  const previousCursor = process.env.AUTONOMOUS_QA_CURSOR_DIR;
   const home = mkdtempSync(join(tmpdir(), "qa-status-home-"));
   process.env.AUTONOMOUS_QA_HOME = home;
+  process.env.AUTONOMOUS_QA_CURSOR_DIR = home;
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
 
   try {
@@ -172,6 +174,11 @@ test("qa.status does not include a fixture API key from the environment", async 
       delete process.env.AUTONOMOUS_QA_HOME;
     } else {
       process.env.AUTONOMOUS_QA_HOME = previousHome;
+    }
+    if (previousCursor === undefined) {
+      delete process.env.AUTONOMOUS_QA_CURSOR_DIR;
+    } else {
+      process.env.AUTONOMOUS_QA_CURSOR_DIR = previousCursor;
     }
     rmSync(home, { recursive: true, force: true });
   }

@@ -1,15 +1,18 @@
 import { z } from "zod";
 import { list, type FlowSummary } from "../../flows/repository.js";
+import { resolveProjectRoot } from "../project-root.js";
 import type { McpTool } from "../load-tools.js";
 
-const schema = z.object({});
+const schema = z.object({
+  projectRoot: z.string().min(1).optional(),
+});
 
 export const tool = {
   name: "qa.list_flows",
   description: "List saved flow metadata. Step bodies are not included.",
   schema,
   async handler(args: unknown): Promise<FlowSummary[]> {
-    schema.parse(args);
-    return list(process.cwd());
+    const input = schema.parse(args);
+    return list(await resolveProjectRoot(input.projectRoot));
   },
 } satisfies McpTool;

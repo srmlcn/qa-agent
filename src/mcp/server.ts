@@ -7,6 +7,7 @@ import { QaError } from "../errors/qa-error.js";
 import { version } from "../index.js";
 import { createLogger } from "../runtime/logger.js";
 import { loadTools, type McpTool } from "./load-tools.js";
+import { rootListerFromClient, setRootLister } from "./project-root.js";
 import { debugTools } from "./tools/debug.js";
 
 const SERVER_NAME = "autonomous-qa";
@@ -130,6 +131,7 @@ export async function serveMcp(): Promise<void> {
   const closed = waitForStdinClose();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  setRootLister(rootListerFromClient(server.server));
   logger.info("mcp server listening on stdio");
   await closed;
   await server.close();

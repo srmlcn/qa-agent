@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { captureProfile, type CapturedProfile } from "../../auth/capture.js";
-import { loadProjectConfig } from "../../config/load-project.js";
+import { loadToolConfig } from "../project-root.js";
 import type { McpTool } from "../load-tools.js";
 
 const schema = z.object({
   projectId: z.string().min(1),
   profile: z.string().min(1),
   startUrl: z.string().min(1),
+  projectRoot: z.string().min(1).optional(),
 });
 
 /**
@@ -20,12 +21,12 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<CapturedProfile> {
     const input = schema.parse(args);
-    const projectRoot = process.cwd();
+    const { config } = await loadToolConfig(input.projectRoot);
     return captureProfile({
       projectId: input.projectId,
       profile: input.profile,
       startUrl: input.startUrl,
-      config: loadProjectConfig(projectRoot),
+      config,
     });
   },
 } satisfies McpTool;

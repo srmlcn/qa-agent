@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { loadProjectConfig } from "../../config/load-project.js";
+import { loadToolConfig } from "../project-root.js";
 import { QaError } from "../../errors/qa-error.js";
 import type { FlowSpec } from "../../flows/schema.js";
 import { repairFlow } from "../../orchestrator/repair.js";
@@ -10,6 +10,7 @@ const schema = z.object({
   flowId: z.string().min(1),
   failedStepId: z.string().min(1).optional(),
   runId: z.string().min(1).optional(),
+  projectRoot: z.string().min(1).optional(),
 });
 
 export type RepairFlowOutput = {
@@ -30,8 +31,7 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<RepairFlowOutput> {
     const input = schema.parse(args);
-    const projectRoot = process.cwd();
-    const config = loadProjectConfig(projectRoot);
+    const { projectRoot, config } = await loadToolConfig(input.projectRoot);
     const provider = createProvider(config.llm);
     if (input.failedStepId === undefined || input.runId === undefined) {
       throw new QaError({
