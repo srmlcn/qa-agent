@@ -1,6 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { loadEffectiveConfig } from "../../config/effective.js";
+import { loadUserConfig, userLlmIsComplete } from "../../config/load-user.js";
 import { PROJECT_ID_PATTERN } from "../../config/schema.js";
+import { recordProjectRoot } from "../../runtime/project-registry.js";
 import type { Command } from "../types.js";
 
 const PROJECT_ID_MAX_LENGTH = 63;
@@ -34,6 +37,7 @@ export const command: Command = {
     await createFlowsDirectory(projectRoot);
     await createProjectConfig(projectRoot);
     await ensureGitignore(projectRoot);
+    rememberProject(projectRoot);
     if (argv.includes("--install-mcp")) {
       await installMcpConfig(projectRoot);
     }
@@ -41,6 +45,14 @@ export const command: Command = {
     return 0;
   },
 };
+
+function rememberProject(projectRoot: string): void {
+  try {
+    recordProjectRoot(loadEffectiveConfig(projectRoot).config.project.id, projectRoot);
+  } catch {
+    // doctor reports an unreadable project config.
+  }
+}
 
 async function createFlowsDirectory(projectRoot: string): Promise<void> {
   await mkdir(join(projectRoot, ".autonomous-qa", "flows"), { recursive: true });
@@ -53,7 +65,8 @@ async function createProjectConfig(projectRoot: string): Promise<void> {
   }
 
   const projectId = projectIdFromDirectoryName(basename(projectRoot));
-  await writeFile(configPath, renderProjectConfig(projectId), "utf8");
+  const includeLlm = !userLlmIsComplete(loadUserConfig().llm);
+  await writeFile(configPath, renderProjectConfig(projectId, includeLlm), "utf8");
 }
 
 /**
@@ -70,7 +83,17 @@ function projectIdFromDirectoryName(directoryName: string): string {
   return FALLBACK_PROJECT_ID;
 }
 
-function renderProjectConfig(projectId: string): string {
+function renderProjectConfig(projectId: string, includeLlm: boolean): string {
+  const llm = includeLlm
+    ? `
+llm:
+  provider: openai-compatible
+  model: company-ui-agent
+  baseUrl: https://llm.company.internal/v1
+  apiKeyEnv: COMPANY_LLM_API_KEY
+  timeoutMs: 60000
+`
+    : "\n";
   return `version: 1
 
 project:
@@ -81,14 +104,7 @@ application:
   allowedHosts:
     - localhost
   productionAllowed: false
-
-llm:
-  provider: openai-compatible
-  model: company-ui-agent
-  baseUrl: https://llm.company.internal/v1
-  apiKeyEnv: COMPANY_LLM_API_KEY
-  timeoutMs: 60000
-
+${llm}
 stagehand:
   enabled: true
   maxSteps: 30

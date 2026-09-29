@@ -20,8 +20,8 @@ export type EffectiveConfigResult = {
 
 /**
  * Loads one effective config.
- * Precedence, highest first: caller `application.baseUrl`, project config,
- * user LLM defaults, then defaults from `defaults.ts` via `loadProjectConfig`.
+ * Precedence, highest first: caller `application.baseUrl`, user LLM fields,
+ * project config, then defaults from `defaults.ts` via `loadProjectConfig`.
  * User `security`, `application.productionAllowed`, and `application.allowedHosts`
  * are ignored. Their names are returned in `warnings`. The API key value is never loaded.
  */
@@ -93,7 +93,11 @@ function mergeUserLlm(
     if (value === undefined) {
       continue;
     }
-    if (projectLlm !== undefined && Object.hasOwn(projectLlm, field)) {
+    if (
+      projectLlm !== undefined &&
+      Object.hasOwn(projectLlm, field) &&
+      sameJsonValue(projectLlm[field], value)
+    ) {
       continue;
     }
     llm[field] = value;
@@ -162,6 +166,10 @@ function warningList(fields: readonly string[]): string[] {
   return [...fields]
     .sort()
     .map((field) => `Ignored user config field ${field}`);
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

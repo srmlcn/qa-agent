@@ -91,18 +91,19 @@ afterEach(() => {
   }
 });
 
-test("project llm.model beats user llm.model", () => {
+test("user llm fields override project llm fields", () => {
   writeUserConfig({ llm: USER_LLM });
   const result = loadEffectiveConfig(writeProjectConfig(FULL_PROJECT));
 
   expect(result.config.llm).toEqual({
-    provider: "openai-compatible",
-    model: PROJECT_MODEL,
-    baseUrl: "https://llm.company.internal/v1",
-    apiKeyEnv: "COMPANY_LLM_API_KEY",
-    timeoutMs: 60000,
-    headers: { "X-Project": "project" },
+    provider: "openai",
+    model: USER_MODEL,
+    baseUrl: "https://user.example/v1",
+    apiKeyEnv: "USER_LLM_API_KEY",
+    timeoutMs: 1000,
+    headers: { "X-User": "user" },
   });
+  expect(result.config.application.baseUrl).toBe("http://localhost:3000");
   expect(result.config.auth.workerProfiles).toEqual([]);
   expect(result.warnings).toEqual([]);
 });
@@ -118,7 +119,7 @@ test("an omitted project model falls back to the user model", () => {
   const result = loadEffectiveConfig(writeProjectConfig(yaml));
 
   expect(result.config.llm.model).toBe(USER_MODEL);
-  expect(result.config.llm.provider).toBe("openai-compatible");
+  expect(result.config.llm.provider).toBe("openai");
   expect(result.config.llm.apiKeyEnv).toBe("COMPANY_LLM_API_KEY");
 });
 
@@ -176,7 +177,7 @@ test("an explicit baseUrl override beats the project baseUrl", () => {
 
   expect(result.config.application.baseUrl).toBe("http://127.0.0.1:3999");
   expect(result.config.application.productionAllowed).toBe(false);
-  expect(result.config.llm.model).toBe(PROJECT_MODEL);
+  expect(result.config.llm.model).toBe(USER_MODEL);
 });
 
 test("an omitted project header map falls back to the user headers", () => {
@@ -217,7 +218,7 @@ test("the effective config does not contain an API key value", () => {
     const result = loadEffectiveConfig(writeProjectConfig(FULL_PROJECT));
     const serialized = JSON.stringify(result);
 
-    expect(result.config.llm.apiKeyEnv).toBe("COMPANY_LLM_API_KEY");
+    expect(result.config.llm.apiKeyEnv).toBe("OPENAI_API_KEY");
     expect(result.config.llm).not.toHaveProperty("apiKey");
     expect(serialized).not.toContain(secret);
     expect(result.warnings).toEqual([
@@ -254,6 +255,53 @@ test("a merged project error names the project file", () => {
   expect(error.message).toContain(projectConfigPath(root));
   expect(error.message).toContain("llm.model");
   expect(error.message).not.toContain("qa-effective-");
+});
+
+test("a project file without llm uses a complete user llm", () => {
+  writeUserConfig({ llm: USER_LLM });
+  const yaml = `
+version: 1
+project:
+  id: demo-app
+application:
+  baseUrl: http://localhost:3000
+  allowedHosts:
+    - localhost
+  productionAllowed: false
+stagehand:
+  enabled: true
+  maxSteps: 30
+  recoveryEnabled: true
+playwright:
+  browser: chromium
+  headless: true
+  workers: 4
+  timeoutMs: 30000
+evidence:
+  screenshots: checkpoints
+  network: true
+  console: true
+  trace: on-failure
+  maxResponseBodyBytes: 262144
+security:
+  redactHeaders:
+    - authorization
+    - cookie
+    - set-cookie
+  destructiveActionsAllowed: false
+`;
+  const result = loadEffectiveConfig(writeProjectConfig(yaml));
+
+  expect(result.config.llm).toEqual({
+    provider: "openai",
+    model: USER_MODEL,
+    baseUrl: "https://user.example/v1",
+    apiKeyEnv: "USER_LLM_API_KEY",
+    timeoutMs: 1000,
+    headers: { "X-User": "user" },
+  });
+  expect(result.config.project.id).toBe("demo-app");
+  expect(result.config.application.allowedHosts).toEqual(["localhost"]);
 });
 
 test("a missing project config is POLICY_BLOCKED", () => {

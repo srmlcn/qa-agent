@@ -9,6 +9,22 @@ const USER_CONFIG_FILE_NAME = "config.json";
 
 const userLlmSchema = llmSchema.partial();
 
+/** True when user LLM settings can stand in for a project `llm` block. */
+export function userLlmIsComplete(llm: Partial<LlmConfig>): boolean {
+  if (
+    llm.provider === undefined ||
+    llm.model === undefined ||
+    llm.apiKeyEnv === undefined ||
+    llm.timeoutMs === undefined
+  ) {
+    return false;
+  }
+  if (llm.provider === "openai-compatible" && llm.baseUrl === undefined) {
+    return false;
+  }
+  return true;
+}
+
 export type LoadedUserConfig = {
   llm: Partial<LlmConfig>;
   ignoredFields: readonly string[];

@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { loadUserEnv } from "../runtime/user-env.js";
 import { loadCommands } from "./registry.js";
 import type { Command } from "./types.js";
 
@@ -12,6 +13,7 @@ function printCommands(commands: readonly Command[]): void {
 }
 
 export async function main(argv: string[]): Promise<number> {
+  loadUserEnv();
   const commands = await loadCommands();
   const [name] = argv;
 
