@@ -74,7 +74,7 @@ beforeEach(() => {
   const scratch = mkdtempSync(join(tmpdir(), "aqa-repair-"));
   scratchDirs.push(scratch);
   projectRoot = join(scratch, "project");
-  mkdirSync(projectRoot, { recursive: true });
+  mkdirSync(join(projectRoot, ".autonomous-qa"), { recursive: true });
   mkdirSync(join(scratch, "home"), { recursive: true });
   process.env.AUTONOMOUS_QA_HOME = join(scratch, "home");
 });

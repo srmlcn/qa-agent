@@ -68,7 +68,7 @@ test(
     const home = join(scratch, "home");
     const projectRoot = join(scratch, "project");
     mkdirSync(home, { recursive: true });
-    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(projectRoot, ".autonomous-qa"), { recursive: true });
     process.env.AUTONOMOUS_QA_HOME = home;
     process.env[USERNAME_ENV] = USERNAME;
     process.env[PASSWORD_ENV] = PASSWORD;

@@ -180,7 +180,7 @@ function abortFlow(flowId: string): void {
 async function executeSaved(flow: FlowSpec) {
   const projectRoot = mkdtempSync(join(tmpdir(), "aqa-cancel-"));
   scratchDirs.push(projectRoot);
-  mkdirSync(projectRoot, { recursive: true });
+  mkdirSync(join(projectRoot, ".autonomous-qa"), { recursive: true });
   save(projectRoot, flow);
   return executeFlow({
     flowId: flow.id,

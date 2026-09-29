@@ -18,7 +18,9 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { PROJECT_ID_PATTERN } from "../config/schema.js";
 import { homeDir } from "../runtime/paths.js";
+import { resolveStateLocation } from "../runtime/state-root.js";
 import { redactBody, redactHeaders } from "../security/redaction.js";
 import {
   isRunStatus,
@@ -56,8 +58,9 @@ type LocatedArtifact = {
 };
 
 /**
- * Creates `<projectRoot>/.autonomous-qa/artifacts/<runId>/` with mode `0700`.
- * The directory matches the root gitignore rule `.autonomous-qa/artifacts/`.
+ * Creates the run directory with mode `0700`.
+ * A repo that already has `.autonomous-qa` keeps artifacts there.
+ * Otherwise artifacts go to `~/.autonomous-qa/projects/<project-id>/artifacts/`.
  */
 export function createRunDir(projectRoot: string, runId: string): string {
   const runDir = resolveRunDir(projectRoot, runId);
@@ -125,13 +128,13 @@ export function writeRun(projectRoot: string, result: RunResult): void {
 
 function resolveRunDir(projectRoot: string, runId: string): string {
   assertSafeRunId(runId);
-  const root = resolve(projectRoot);
-  const runDir = join(root, ".autonomous-qa", "artifacts", runId);
-  if (!isLexicalInside(root, runDir)) {
+  const location = resolveStateLocation(projectRoot);
+  const runDir = join(location.root, "artifacts", runId);
+  if (!isLexicalInside(location.root, runDir)) {
     throw new Error(`Invalid run id: ${runId}`);
   }
   assertNotUnderAuth(runDir);
-  assertRealContained(root, runDir);
+  assertRealContained(location.containment, runDir);
   return runDir;
 }
 
@@ -211,16 +214,45 @@ function findRunDir(runId: string, artifactPath: string): string {
     throw new Error("Invalid artifact path");
   }
   const resolved = resolve(artifactPath);
-  const marker = `${sep}.autonomous-qa${sep}artifacts${sep}${runId}`;
+  const repoDir = directoryFromMarker(
+    resolved,
+    `${sep}.autonomous-qa${sep}artifacts${sep}${runId}`,
+  );
+  if (repoDir !== undefined) {
+    return repoDir;
+  }
+  return homeRunDir(runId, resolved);
+}
+
+function directoryFromMarker(resolved: string, marker: string): string | undefined {
   const index = resolved.lastIndexOf(marker);
   if (index < 0) {
-    throw new Error("Invalid artifact path");
+    return undefined;
   }
   const end = index + marker.length;
   if (resolved[end] !== sep) {
-    throw new Error("Invalid artifact path");
+    return undefined;
   }
   return resolved.slice(0, end);
+}
+
+function homeRunDir(runId: string, resolved: string): string {
+  const runDir = directoryFromMarker(resolved, `${sep}artifacts${sep}${runId}`);
+  if (runDir === undefined) {
+    throw new Error("Invalid artifact path");
+  }
+  const projectDir = dirname(dirname(runDir));
+  const projects = dirname(projectDir);
+  if (projects !== join(resolve(homeDir()), "projects")) {
+    throw new Error("Invalid artifact path");
+  }
+  if (!PROJECT_ID_PATTERN.test(basename(projectDir))) {
+    throw new Error("Invalid artifact path");
+  }
+  if (!isLexicalInside(resolve(homeDir()), runDir)) {
+    throw new Error("Invalid artifact path");
+  }
+  return runDir;
 }
 
 function locateArtifact(runDir: string, artifactPath: string): LocatedArtifact {

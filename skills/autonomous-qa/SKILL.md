@@ -19,12 +19,14 @@ Cursor plans. Stagehand discovers. Playwright executes. The MCP server coordinat
 
 ## Repositories
 
-User LLM settings live in `~/.autonomous-qa/config.json`. The API key stays in the environment named by `llm.apiKeyEnv`, or in `~/.autonomous-qa/env`. Do not write the key into the repo, a flow, or tool arguments.
+Global settings in `~/.autonomous-qa/config.json` apply in every repo. The API key stays in the environment named by `llm.apiKeyEnv`, or in `~/.autonomous-qa/env`. Do not write the key into the repo, a flow, or tool arguments.
 
-Each repo has `.autonomous-qa/config.yml` and `.autonomous-qa/flows/`. If the config file is missing, run `autonomous-qa init` in that repo before any browser tool. Init records the app URL, host allowlist, and project id. It does not register MCP for that repo.
+A repo does not need `.cursor` or `.autonomous-qa`. Browser tools use the global settings and built-in localhost defaults. Flows and run artifacts then go to `~/.autonomous-qa/projects/<project-id>/`.
 
-`allowedHosts`, `productionAllowed`, and destructive-action policy come from the repo. User config cannot change them.
+When a repo needs a local override, add `.autonomous-qa/config.yml`. A key in that file replaces the same global key. A key the file omits stays global. `allowedHosts`, `productionAllowed`, and `security` have no global scope. They stay at the built-in defaults unless the repo file sets them. If `.autonomous-qa` already exists, flows and artifacts stay in the repo.
 
-When several workspace roots are open, pass `projectRoot` set to the root that contains `.autonomous-qa/config.yml`.
+`autonomous-qa init` creates that override directory, gitignore entries, and an optional project MCP server with `--install-mcp`. Do not run it before ordinary browser tools.
+
+When several workspace roots are open and none contain `.autonomous-qa`, pass `projectRoot`. When exactly one root contains `.autonomous-qa`, that root is selected.
 
 A project `.cursor/mcp.json` server named `autonomous-qa` overrides the user-level server.

@@ -91,17 +91,17 @@ afterEach(() => {
   }
 });
 
-test("user llm fields override project llm fields", () => {
+test("repo llm fields override the same user llm fields", () => {
   writeUserConfig({ llm: USER_LLM });
   const result = loadEffectiveConfig(writeProjectConfig(FULL_PROJECT));
 
   expect(result.config.llm).toEqual({
-    provider: "openai",
-    model: USER_MODEL,
-    baseUrl: "https://user.example/v1",
-    apiKeyEnv: "USER_LLM_API_KEY",
-    timeoutMs: 1000,
-    headers: { "X-User": "user" },
+    provider: "openai-compatible",
+    model: PROJECT_MODEL,
+    baseUrl: "https://llm.company.internal/v1",
+    apiKeyEnv: "COMPANY_LLM_API_KEY",
+    timeoutMs: 60000,
+    headers: { "X-Project": "project" },
   });
   expect(result.config.application.baseUrl).toBe("http://localhost:3000");
   expect(result.config.auth.workerProfiles).toEqual([]);
@@ -119,7 +119,7 @@ test("an omitted project model falls back to the user model", () => {
   const result = loadEffectiveConfig(writeProjectConfig(yaml));
 
   expect(result.config.llm.model).toBe(USER_MODEL);
-  expect(result.config.llm.provider).toBe("openai");
+  expect(result.config.llm.provider).toBe("openai-compatible");
   expect(result.config.llm.apiKeyEnv).toBe("COMPANY_LLM_API_KEY");
 });
 
@@ -177,7 +177,7 @@ test("an explicit baseUrl override beats the project baseUrl", () => {
 
   expect(result.config.application.baseUrl).toBe("http://127.0.0.1:3999");
   expect(result.config.application.productionAllowed).toBe(false);
-  expect(result.config.llm.model).toBe(USER_MODEL);
+  expect(result.config.llm.model).toBe(PROJECT_MODEL);
 });
 
 test("an omitted project header map falls back to the user headers", () => {
@@ -215,7 +215,8 @@ test("the effective config does not contain an API key value", () => {
   });
 
   try {
-    const result = loadEffectiveConfig(writeProjectConfig(FULL_PROJECT));
+    const yaml = FULL_PROJECT.replace("  apiKeyEnv: COMPANY_LLM_API_KEY\n", "");
+    const result = loadEffectiveConfig(writeProjectConfig(yaml));
     const serialized = JSON.stringify(result);
 
     expect(result.config.llm.apiKeyEnv).toBe("OPENAI_API_KEY");
@@ -304,13 +305,112 @@ security:
   expect(result.config.application.allowedHosts).toEqual(["localhost"]);
 });
 
-test("a missing project config is POLICY_BLOCKED", () => {
+test("a missing project file uses global llm settings and localhost defaults", () => {
+  writeUserConfig({ llm: USER_LLM });
+  const root = createProjectRoot();
+  const result = loadEffectiveConfig(root);
+
+  expect(result.config.llm).toEqual({
+    provider: "openai",
+    model: USER_MODEL,
+    baseUrl: "https://user.example/v1",
+    apiKeyEnv: "USER_LLM_API_KEY",
+    timeoutMs: 1000,
+    headers: { "X-User": "user" },
+  });
+  expect(result.config.application).toEqual({
+    baseUrl: "http://localhost:3000",
+    allowedHosts: ["localhost"],
+    productionAllowed: false,
+  });
+  expect(result.config.project.id).toMatch(/^[a-z0-9][a-z0-9-]{0,62}$/);
+  expect(result.warnings).toEqual([]);
+});
+
+test("a partial repo file overrides only the keys it sets", () => {
+  writeUserConfig({
+    llm: USER_LLM,
+    application: { baseUrl: "https://user.example" },
+  });
+  const yaml = `
+version: 1
+project:
+  id: demo-app
+application:
+  baseUrl: http://127.0.0.1:4000
+llm:
+  model: ${PROJECT_MODEL}
+`;
+  const result = loadEffectiveConfig(writeProjectConfig(yaml));
+
+  expect(result.config.application.baseUrl).toBe("http://127.0.0.1:4000");
+  expect(result.config.application.allowedHosts).toEqual(["localhost"]);
+  expect(result.config.llm.model).toBe(PROJECT_MODEL);
+  expect(result.config.llm.timeoutMs).toBe(USER_LLM.timeoutMs);
+  expect(result.config.llm.provider).toBe(USER_LLM.provider);
+  expect(result.config.llm.apiKeyEnv).toBe(USER_LLM.apiKeyEnv);
+});
+
+test("user safety fields never enter an effective config without a repo file", () => {
+  const secret = "user-safety-secret-should-not-apply";
+  writeUserConfig({
+    llm: USER_LLM,
+    application: {
+      baseUrl: "https://user.example",
+      productionAllowed: true,
+      allowedHosts: ["evil.example", "localhost"],
+    },
+    security: {
+      destructiveActionsAllowed: true,
+      note: secret,
+    },
+  });
+  const result = loadEffectiveConfig(createProjectRoot());
+
+  expect(result.config.application.baseUrl).toBe("https://user.example");
+  expect(result.config.application.allowedHosts).toEqual(["localhost"]);
+  expect(result.config.application.productionAllowed).toBe(false);
+  expect(result.config.security.destructiveActionsAllowed).toBe(false);
+  expect(JSON.stringify(result)).not.toContain(secret);
+  expect(JSON.stringify(result)).not.toContain("evil.example");
+  expect(result.warnings).toEqual([
+    "Ignored user config field application.allowedHosts",
+    "Ignored user config field application.productionAllowed",
+    "Ignored user config field security",
+  ]);
+});
+
+test("a repo allowedHosts list replaces the default list", () => {
+  writeUserConfig({ llm: USER_LLM });
+  const yaml = FULL_PROJECT.replace(
+    "  allowedHosts:\n    - localhost\n",
+    "  allowedHosts:\n    - localhost\n    - 127.0.0.1\n",
+  );
+  const result = loadEffectiveConfig(writeProjectConfig(yaml));
+
+  expect(result.config.application.allowedHosts).toEqual(["localhost", "127.0.0.1"]);
+});
+
+test("a repo header map replaces the user header map", () => {
+  writeUserConfig({
+    llm: {
+      headers: { "X-User": "user", "X-Shared": "user" },
+    },
+  });
+  const result = loadEffectiveConfig(writeProjectConfig(FULL_PROJECT));
+
+  expect(result.config.llm.headers).toEqual({ "X-Project": "project" });
+});
+
+test("incomplete global llm settings name the user config", () => {
   writeUserConfig({ llm: { model: USER_MODEL } });
   const root = createProjectRoot();
   const error = expectPolicyBlocked(() => loadEffectiveConfig(root));
 
-  expect(error.message).toContain(".autonomous-qa/config.yml");
-  expect(error.message).toContain("Missing");
+  expect(error.message).toContain("config.json");
+  expect(error.message).toContain("llm.provider");
+  expect(error.message).not.toContain("Missing");
+  expect(error.message).not.toContain(".autonomous-qa/config.yml");
 });
 
 function writeUserConfig(value: unknown): void {

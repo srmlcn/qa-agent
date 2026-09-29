@@ -1,9 +1,16 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ZodError, type ZodIssue } from "zod";
+import { z, ZodError, type ZodIssue } from "zod";
 import { QaError } from "../errors/qa-error.js";
 import { homeDir } from "../runtime/paths.js";
-import { llmSchema, type LlmConfig } from "./schema.js";
+import {
+  authSchema,
+  evidenceSchema,
+  llmSchema,
+  playwrightSchema,
+  stagehandSchema,
+  type LlmConfig,
+} from "./schema.js";
 
 const USER_CONFIG_FILE_NAME = "config.json";
 
@@ -27,6 +34,8 @@ export function userLlmIsComplete(llm: Partial<LlmConfig>): boolean {
 
 export type LoadedUserConfig = {
   llm: Partial<LlmConfig>;
+  /** Non-safety keys to merge under a repo file. Arrays and `llm.headers` replace. */
+  overlay: Readonly<Record<string, unknown>>;
   ignoredFields: readonly string[];
 };
 
@@ -48,7 +57,7 @@ export function loadUserConfig(): LoadedUserConfig {
   const filePath = userConfigPath();
   const source = readUserSource(filePath);
   if (source === undefined) {
-    return { llm: {}, ignoredFields: [] };
+    return { llm: {}, overlay: {}, ignoredFields: [] };
   }
   return interpretUserConfig(parseUserJson(source, filePath), filePath);
 }
@@ -80,9 +89,11 @@ function interpretUserConfig(value: unknown, filePath: string): LoadedUserConfig
   const ignoredFields: string[] = [];
   collectIgnoredSafetyFields(value, ignoredFields);
   stripApiKey(value, "apiKey", ignoredFields);
+  const llm = readUserLlm(value, filePath, ignoredFields);
 
   return {
-    llm: readUserLlm(value, filePath, ignoredFields),
+    llm,
+    overlay: userOverlay(value, llm, filePath),
     ignoredFields,
   };
 }
@@ -104,6 +115,102 @@ function collectIgnoredSafetyFields(
   if (Object.hasOwn(application, "allowedHosts")) {
     ignoredFields.push("application.allowedHosts");
   }
+}
+
+const USER_BLOCKS = {
+  stagehand: stagehandSchema,
+  playwright: playwrightSchema,
+  evidence: evidenceSchema,
+  auth: authSchema,
+} as const;
+
+function userOverlay(
+  root: Record<string, unknown>,
+  llm: Partial<LlmConfig>,
+  filePath: string,
+): Record<string, unknown> {
+  const overlay: Record<string, unknown> = {};
+  const llmOverlay = definedEntries(llm);
+  if (Object.keys(llmOverlay).length > 0) {
+    overlay.llm = llmOverlay;
+  }
+  const baseUrl = readUserBaseUrl(root, filePath);
+  if (baseUrl !== undefined) {
+    overlay.application = { baseUrl };
+  }
+  for (const [field, schema] of Object.entries(USER_BLOCKS)) {
+    if (!Object.hasOwn(root, field)) {
+      continue;
+    }
+    overlay[field] = validatedBlock(schema, root[field], filePath, field);
+  }
+  return overlay;
+}
+
+function readUserBaseUrl(
+  root: Record<string, unknown>,
+  filePath: string,
+): string | undefined {
+  if (!Object.hasOwn(root, "application")) {
+    return undefined;
+  }
+  const application = root.application;
+  if (!isPlainObject(application)) {
+    throw configError(invalidUserConfigMessage(filePath, ["application"]));
+  }
+  if (!Object.hasOwn(application, "baseUrl")) {
+    return undefined;
+  }
+  const parsed = z.string().url().safeParse(application.baseUrl);
+  if (!parsed.success) {
+    throw configError(invalidUserConfigMessage(filePath, ["application.baseUrl"]));
+  }
+  return parsed.data;
+}
+
+function validatedBlock(
+  schema: z.ZodObject<z.ZodRawShape>,
+  value: unknown,
+  filePath: string,
+  field: string,
+): Record<string, unknown> {
+  if (!isPlainObject(value)) {
+    throw configError(invalidUserConfigMessage(filePath, [field]));
+  }
+  const parsed = schema.partial().safeParse(value);
+  if (!parsed.success) {
+    throw configError(
+      invalidUserConfigMessage(filePath, blockFieldNames(field, parsed.error)),
+    );
+  }
+  const accepted = parsed.data;
+  const block: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (accepted[key] !== undefined) {
+      block[key] = structuredClone(value[key]);
+    }
+  }
+  return block;
+}
+
+function definedEntries(llm: Partial<LlmConfig>): Record<string, unknown> {
+  const entries: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(llm)) {
+    if (value !== undefined) {
+      entries[key] = structuredClone(value);
+    }
+  }
+  return entries;
+}
+
+function blockFieldNames(prefix: string, error: ZodError): string[] {
+  const names: string[] = [];
+  for (const issue of error.issues) {
+    for (const name of issueFieldNames(issue)) {
+      names.push(name === "(root)" ? prefix : `${prefix}.${name}`);
+    }
+  }
+  return names.length === 0 ? [prefix] : names;
 }
 
 function readUserLlm(

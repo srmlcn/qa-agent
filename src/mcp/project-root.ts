@@ -1,8 +1,7 @@
-import { existsSync, realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEffectiveConfig } from "../config/effective.js";
-import { projectConfigPath } from "../config/load-project.js";
 import type { ProjectConfig } from "../config/schema.js";
 import { QaError } from "../errors/qa-error.js";
 
@@ -49,7 +48,7 @@ export function rootListerFromClient(client: RootsClient): RootLister {
  * Picks the repo for one tool call.
  * An explicit path must sit inside a client root.
  * One client root is used as-is.
- * Several roots resolve to the single root that contains `.autonomous-qa/config.yml`.
+ * Several roots resolve to the single root that contains `.autonomous-qa`.
  * With no client roots, the process working directory is the fallback.
  */
 export async function resolveProjectRoot(explicit: string | undefined): Promise<string> {
@@ -88,14 +87,23 @@ function explicitRoot(explicit: string, roots: readonly string[]): string {
 }
 
 function configuredRoot(roots: readonly string[]): string {
-  const matches = roots.filter((root) => existsSync(projectConfigPath(root)));
+  const matches = roots.filter((root) => hasOverrideDirectory(root));
   if (matches.length === 1) {
     return matches[0] ?? roots[0] ?? resolve(process.cwd());
   }
   const noun = matches.length === 0
-    ? "No workspace root contains .autonomous-qa/config.yml"
-    : "Multiple workspace roots contain .autonomous-qa/config.yml";
+    ? "No workspace root contains .autonomous-qa"
+    : "Multiple workspace roots contain .autonomous-qa";
   throw blocked(`${noun}. Candidates: ${roots.join(", ")}`);
+}
+
+function hasOverrideDirectory(root: string): boolean {
+  try {
+    lstatSync(join(root, ".autonomous-qa"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isInside(root: string, candidate: string): boolean {

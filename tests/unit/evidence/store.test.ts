@@ -161,25 +161,23 @@ test("readRun returns the same status that was written", () => {
   expect(stored.console.errors[0]?.text).toBe("Authorization: [redacted]");
 });
 
-test("artifact directory is under the project artifacts tree, not under the home auth directory", () => {
+test("artifact directory is under the home project tree until the repo opts in", () => {
   const runDir = createRunDir(projectRoot, RUN_ID);
-  const projectArtifacts = join(
-    projectRoot,
-    ".autonomous-qa",
-    "artifacts",
-    RUN_ID,
-  );
+  const homeArtifacts = join(tempHome, "projects", "repo", "artifacts", RUN_ID);
   const homeAuth = join(homedir(), ".autonomous-qa", "auth");
   const configuredAuth = join(tempHome, "auth");
 
-  expect(runDir).toBe(projectArtifacts);
-  expect(runDir.startsWith(`${join(projectRoot, ".autonomous-qa", "artifacts")}${sep}`)).toBe(
-    true,
-  );
+  expect(runDir).toBe(homeArtifacts);
+  expect(existsSync(join(projectRoot, ".autonomous-qa"))).toBe(false);
   expect(isUnder(homeAuth, runDir)).toBe(false);
   expect(isUnder(configuredAuth, runDir)).toBe(false);
   expect(statSync(runDir).isDirectory()).toBe(true);
   expect(statSync(runDir).mode & 0o777).toBe(0o700);
+
+  const optedIn = join(scratch, "opted-in");
+  mkdirSync(join(optedIn, ".autonomous-qa"), { recursive: true });
+  const repoRunDir = createRunDir(optedIn, RUN_ID);
+  expect(repoRunDir).toBe(join(optedIn, ".autonomous-qa", "artifacts", RUN_ID));
 
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
   const gitignore = readFileSync(join(packageRoot, ".gitignore"), "utf8");

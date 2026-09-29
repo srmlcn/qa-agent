@@ -1,4 +1,14 @@
+const DEFAULT_BASE_URL = "http://localhost:3000";
+const DEFAULT_ALLOWED_HOSTS = ["localhost"] as const;
 const DEFAULT_PRODUCTION_ALLOWED = false;
+const DEFAULT_PLAYWRIGHT_WORKERS = 4;
+const DEFAULT_PLAYWRIGHT_TIMEOUT_MS = 30_000;
+const DEFAULT_STAGEHAND_ENABLED = true;
+const DEFAULT_STAGEHAND_RECOVERY_ENABLED = true;
+const DEFAULT_EVIDENCE_SCREENSHOTS = "checkpoints";
+const DEFAULT_EVIDENCE_NETWORK = true;
+const DEFAULT_EVIDENCE_CONSOLE = true;
+const DEFAULT_EVIDENCE_TRACE = "on-failure";
 const DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED = false;
 /** Ten minutes. Used when `security.maxRunDurationMs` is omitted. */
 const DEFAULT_MAX_RUN_DURATION_MS = 600_000;
@@ -26,6 +36,8 @@ const DEFAULT_VIDEO_HEIGHT = 720;
 const DEFAULT_FFMPEG_CRF = 23;
 
 export {
+  DEFAULT_ALLOWED_HOSTS,
+  DEFAULT_BASE_URL,
   DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED,
   DEFAULT_MAX_RESPONSE_BODY_BYTES,
   DEFAULT_MAX_RUN_DURATION_MS,
@@ -37,6 +49,48 @@ export {
   DEFAULT_STAGEHAND_MAX_STEPS,
   DEFAULT_WORKER_PROFILES,
 };
+
+/**
+ * Built-in project document used when a repo omits a key.
+ * `llm` is absent: it comes from user config or the repo file.
+ * Safety keys are present here because user config cannot set them.
+ */
+export function builtinProjectDocument(projectId: string): Record<string, unknown> {
+  return {
+    version: 1,
+    project: { id: projectId },
+    application: {
+      baseUrl: DEFAULT_BASE_URL,
+      allowedHosts: [...DEFAULT_ALLOWED_HOSTS],
+      productionAllowed: DEFAULT_PRODUCTION_ALLOWED,
+    },
+    stagehand: {
+      enabled: DEFAULT_STAGEHAND_ENABLED,
+      maxSteps: DEFAULT_STAGEHAND_MAX_STEPS,
+      recoveryEnabled: DEFAULT_STAGEHAND_RECOVERY_ENABLED,
+    },
+    playwright: {
+      browser: DEFAULT_PLAYWRIGHT_BROWSER,
+      headless: DEFAULT_PLAYWRIGHT_HEADLESS,
+      workers: DEFAULT_PLAYWRIGHT_WORKERS,
+      timeoutMs: DEFAULT_PLAYWRIGHT_TIMEOUT_MS,
+    },
+    evidence: {
+      screenshots: DEFAULT_EVIDENCE_SCREENSHOTS,
+      network: DEFAULT_EVIDENCE_NETWORK,
+      console: DEFAULT_EVIDENCE_CONSOLE,
+      trace: DEFAULT_EVIDENCE_TRACE,
+      maxResponseBodyBytes: DEFAULT_MAX_RESPONSE_BODY_BYTES,
+    },
+    security: {
+      destructiveActionsAllowed: DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED,
+      redactHeaders: [...DEFAULT_REDACT_HEADERS],
+    },
+    auth: {
+      workerProfiles: [...DEFAULT_WORKER_PROFILES],
+    },
+  };
+}
 
 const APPLICATION_DEFAULTS: Readonly<Record<string, unknown>> = {
   productionAllowed: DEFAULT_PRODUCTION_ALLOWED,
