@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { collectHealth, type HealthReport } from "../../health/status.js";
+import { resolveProjectRoot } from "../project-root.js";
 import type { McpTool } from "../load-tools.js";
 
 export type StatusReport = HealthReport;
 
-const schema = z.object({});
+const schema = z.object({
+  projectRoot: z.string().min(1).optional(),
+});
 
 /**
  * Reports runtime health for one project root.
@@ -20,7 +23,7 @@ export const tool = {
     "Report package, Node, config, browser, home, and LLM health. Does not print secrets or launch a browser.",
   schema,
   async handler(args: unknown): Promise<StatusReport> {
-    schema.parse(args);
-    return reportStatus(process.cwd());
+    const input = schema.parse(args);
+    return reportStatus(await resolveProjectRoot(input.projectRoot));
   },
 } satisfies McpTool;

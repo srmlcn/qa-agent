@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { chromium } from "playwright";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { command } from "../../../src/cli/commands/doctor.js";
@@ -8,20 +8,27 @@ import { projectConfigPath } from "../../../src/config/load-project.js";
 import { collectHealth } from "../../../src/health/status.js";
 import { version } from "../../../src/index.js";
 import { reportStatus } from "../../../src/mcp/tools/status.js";
+import { recordProjectRoot } from "../../../src/runtime/project-registry.js";
+import { appDir, userEnvPath, userMcpPath } from "../../../src/runtime/paths.js";
 
 const FIXTURE_API_KEY = "doctor-fixture-key-do-not-print";
 const API_KEY_ENV = "QA_DOCTOR_FIXTURE_KEY";
 
 const roots: string[] = [];
 let home: string;
+let cursor: string;
 let previousHome: string | undefined;
+let previousCursor: string | undefined;
 let previousKey: string | undefined;
 
 beforeEach(() => {
   previousHome = process.env.AUTONOMOUS_QA_HOME;
+  previousCursor = process.env.AUTONOMOUS_QA_CURSOR_DIR;
   previousKey = process.env[API_KEY_ENV];
   home = mkdtempSync(join(tmpdir(), "qa-doctor-home-"));
+  cursor = mkdtempSync(join(tmpdir(), "qa-doctor-cursor-"));
   process.env.AUTONOMOUS_QA_HOME = home;
+  process.env.AUTONOMOUS_QA_CURSOR_DIR = cursor;
   delete process.env[API_KEY_ENV];
 });
 
@@ -32,6 +39,12 @@ afterEach(() => {
   } else {
     process.env.AUTONOMOUS_QA_HOME = previousHome;
   }
+  if (previousCursor === undefined) {
+    delete process.env.AUTONOMOUS_QA_CURSOR_DIR;
+  } else {
+    process.env.AUTONOMOUS_QA_CURSOR_DIR = previousCursor;
+  }
+  rmSync(cursor, { recursive: true, force: true });
   if (previousKey === undefined) {
     delete process.env[API_KEY_ENV];
   } else {
@@ -54,6 +67,7 @@ test("a valid project returns configOk true", async () => {
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
   stubInstalledChromium();
 
+  markUserInstall();
   const health = collectHealth(root);
   expect(health).toEqual({
     packageVersion: version,
@@ -62,6 +76,10 @@ test("a valid project returns configOk true", async () => {
     browserOk: true,
     llmOk: true,
     homeOk: true,
+    appOk: true,
+    userMcpOk: true,
+    projectMcpOverride: false,
+    userInstallOk: true,
     ffmpegAvailable: health.ffmpegAvailable,
     problems: [],
   });
@@ -74,16 +92,19 @@ test("a valid project returns configOk true", async () => {
   expect(JSON.parse(printed.stdout)).toEqual(health);
 });
 
-test("a missing config names the path and doctor exits 1", async () => {
+test("a missing project config is reported and does not fail a healthy user install", async () => {
   const root = createProject();
   const configPath = projectConfigPath(root);
+  markUserInstall();
+  stubInstalledChromium();
   const health = collectHealth(root);
 
   expect(health.configOk).toBe(false);
+  expect(health.userInstallOk).toBe(true);
   expect(health.problems.some((problem) => problem.includes(configPath))).toBe(true);
 
   const printed = await runDoctor(root);
-  expect(printed.code).toBe(1);
+  expect(printed.code).toBe(0);
   expect(JSON.parse(printed.stdout)).toEqual(health);
   expect(printed.stdout).toContain(configPath);
 });
@@ -91,6 +112,7 @@ test("a missing config names the path and doctor exits 1", async () => {
 test("an unset API key is a problem and doctor still exits 0", async () => {
   const root = createProject();
   writeProjectConfig(root);
+  markUserInstall();
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
   stubInstalledChromium();
   const withKey = await runDoctor(root);
@@ -196,6 +218,52 @@ test("Node below 22 makes nodeOk false and doctor exits 1", async () => {
   }
 });
 
+test("doctor reads the private env file and does not print the key", async () => {
+  const root = createProject();
+  writeProjectConfig(root);
+  markUserInstall();
+  stubInstalledChromium();
+  writeFileSync(userEnvPath(), `${API_KEY_ENV}=${FIXTURE_API_KEY}\n`, { mode: 0o600 });
+  chmodSync(userEnvPath(), 0o600);
+
+  const printed = await runDoctor(root);
+  const health = JSON.parse(printed.stdout) as { llmOk: boolean; problems: string[] };
+
+  expect(printed.code).toBe(0);
+  expect(health.llmOk).toBe(true);
+  expect(printed.stdout).not.toContain(FIXTURE_API_KEY);
+});
+
+test("a shared project id and a project MCP server are problems with exit 0", async () => {
+  const root = createProject();
+  const other = createProject();
+  writeProjectConfig(root);
+  markUserInstall();
+  stubInstalledChromium();
+  process.env[API_KEY_ENV] = FIXTURE_API_KEY;
+  recordProjectRoot("demo-app", other);
+  recordProjectRoot("demo-app", root);
+  mkdirSync(join(root, ".cursor"));
+  writeFileSync(
+    join(root, ".cursor", "mcp.json"),
+    JSON.stringify({ mcpServers: { "autonomous-qa": { command: "custom" } } }),
+  );
+
+  const health = collectHealth(root);
+
+  expect(health.userInstallOk).toBe(true);
+  expect(health.projectMcpOverride).toBe(true);
+  expect(health.problems).toContain(
+    "Project .cursor/mcp.json overrides the user autonomous-qa server",
+  );
+  expect(health.problems).toContain(`Project id demo-app is also used at ${other}`);
+  expect(JSON.stringify(health)).not.toContain(FIXTURE_API_KEY);
+
+  const printed = await runDoctor(root);
+  expect(printed.code).toBe(0);
+  expect(printed.stdout).not.toContain(FIXTURE_API_KEY);
+});
+
 test("doctor is the autoloaded command name", () => {
   expect(command.name).toBe("doctor");
   expect(command.summary).toBe("report installation health");
@@ -204,6 +272,18 @@ test("doctor is the autoloaded command name", () => {
 /** CI does not install Chromium. These checks are not about browser setup. */
 function stubInstalledChromium(): void {
   vi.spyOn(chromium, "executablePath").mockReturnValue(process.execPath);
+}
+
+function markUserInstall(): void {
+  const entry = join(appDir(), "dist", "cli", "main.js");
+  mkdirSync(dirname(entry), { recursive: true });
+  writeFileSync(entry, "cli\n");
+  writeFileSync(
+    userMcpPath(),
+    JSON.stringify({
+      mcpServers: { "autonomous-qa": { command: process.execPath, args: ["mcp"] } },
+    }),
+  );
 }
 
 async function runDoctor(root: string): Promise<{ code: number; stdout: string }> {

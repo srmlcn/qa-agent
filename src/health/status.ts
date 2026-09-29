@@ -1,11 +1,12 @@
 import { execSync } from "node:child_process";
-import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { dirname } from "node:path";
-import { chromium } from "playwright";
-import { loadProjectConfig } from "../config/load-project.js";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { loadEffectiveConfig } from "../config/effective.js";
 import { QaError } from "../errors/qa-error.js";
 import { version } from "../index.js";
-import { homeDir } from "../runtime/paths.js";
+import { installedChromiumExecutable } from "../playwright/runtime.js";
+import { otherProjectPaths } from "../runtime/project-registry.js";
+import { appDir, homeDir, userMcpPath } from "../runtime/paths.js";
 
 const MIN_NODE_MAJOR = 22;
 const PRIVATE_DIR_MODE = 0o700;
@@ -17,6 +18,10 @@ export type HealthReport = {
   browserOk: boolean;
   llmOk: boolean;
   homeOk: boolean;
+  appOk: boolean;
+  userMcpOk: boolean;
+  projectMcpOverride: boolean;
+  userInstallOk: boolean;
   ffmpegAvailable: boolean;
   problems: string[];
 };
@@ -39,9 +44,26 @@ export function collectHealth(projectRoot: string): HealthReport {
     problems.push("Chromium is not installed");
   }
 
+  const appOk = appInstalled();
+  if (!appOk) {
+    problems.push(`Installed app is missing at ${join(appDir(), "dist", "cli", "main.js")}`);
+  }
+
+  const userMcpOk = userMcpInstalled();
+  if (!userMcpOk) {
+    problems.push(`User MCP server is missing at ${userMcpPath()}`);
+  }
+
+  const projectMcpOverride = projectOverridesUserServer(projectRoot);
+  if (projectMcpOverride) {
+    problems.push("Project .cursor/mcp.json overrides the user autonomous-qa server");
+  }
+
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) {
     problems.push(loaded.problem);
+  } else {
+    pushProjectIdCollisions(loaded.projectId, projectRoot, problems);
   }
 
   const llmOk = loaded.ok ? envVarIsSet(loaded.apiKeyEnv) : false;
@@ -58,6 +80,8 @@ export function collectHealth(projectRoot: string): HealthReport {
 
   const ffmpegAvailable = ffmpegExecutableExists();
 
+  const userInstallOk = nodeOk && home.ok && browserOk && appOk && userMcpOk;
+
   return {
     packageVersion: version,
     nodeOk,
@@ -65,6 +89,10 @@ export function collectHealth(projectRoot: string): HealthReport {
     browserOk,
     llmOk,
     homeOk: home.ok,
+    appOk,
+    userMcpOk,
+    projectMcpOverride,
+    userInstallOk,
     ffmpegAvailable,
     problems,
   };
@@ -80,15 +108,19 @@ function ffmpegExecutableExists(): boolean {
 }
 
 type LoadedConfig =
-  | { ok: true; apiKeyEnv: string }
+  | { ok: true; apiKeyEnv: string; projectId: string }
   | { ok: false; problem: string };
 
 type HomeCheck = { ok: true } | { ok: false; problem: string };
 
 function loadConfig(projectRoot: string): LoadedConfig {
   try {
-    const config = loadProjectConfig(projectRoot);
-    return { ok: true, apiKeyEnv: config.llm.apiKeyEnv };
+    const config = loadEffectiveConfig(projectRoot).config;
+    return {
+      ok: true,
+      apiKeyEnv: config.llm.apiKeyEnv,
+      projectId: config.project.id,
+    };
   } catch (error: unknown) {
     if (error instanceof QaError) {
       return { ok: false, problem: error.message };
@@ -108,13 +140,64 @@ function nodeMajor(): number {
   return Number.isInteger(major) ? major : 0;
 }
 
-/** Uses the Playwright executable path only. Does not launch Chromium. */
+/** Uses the home browsers directory, or `PLAYWRIGHT_BROWSERS_PATH` when set. */
 function chromiumExecutableExists(): boolean {
+  return installedChromiumExecutable() !== undefined;
+}
+
+function appInstalled(): boolean {
+  return existsSync(join(appDir(), "dist", "cli", "main.js"));
+}
+
+function userMcpInstalled(): boolean {
+  const filePath = userMcpPath();
+  if (!existsSync(filePath)) {
+    return false;
+  }
   try {
-    return existsSync(chromium.executablePath());
+    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
+    if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) {
+      return false;
+    }
+    const server = parsed.mcpServers["autonomous-qa"];
+    return isRecord(server) && typeof server.command === "string" && server.command.length > 0;
   } catch {
     return false;
   }
+}
+
+function projectOverridesUserServer(projectRoot: string): boolean {
+  const filePath = join(projectRoot, ".cursor", "mcp.json");
+  if (!existsSync(filePath)) {
+    return false;
+  }
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
+    if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) {
+      return false;
+    }
+    return Object.hasOwn(parsed.mcpServers, "autonomous-qa");
+  } catch {
+    return false;
+  }
+}
+
+function pushProjectIdCollisions(
+  projectId: string,
+  projectRoot: string,
+  problems: string[],
+): void {
+  try {
+    for (const path of otherProjectPaths(projectId, projectRoot)) {
+      problems.push(`Project id ${projectId} is also used at ${path}`);
+    }
+  } catch {
+    problems.push("Project registry could not be read");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

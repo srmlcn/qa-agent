@@ -5,7 +5,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { main } from "../../../src/cli/main.js";
 import { loadCommands } from "../../../src/cli/registry.js";
 import { EXPECTED_EVIDENCE_CAPTURE } from "../../../src/config/evidence-defaults.js";
+import { loadEffectiveConfig } from "../../../src/config/effective.js";
 import { loadProjectConfig } from "../../../src/config/load-project.js";
+import { userConfigPath } from "../../../src/config/load-user.js";
 
 const GITIGNORE_ENTRIES = [
   ".autonomous-qa/artifacts/",
@@ -196,6 +198,47 @@ test("--install-mcp leaves an existing autonomous-qa server unchanged", async ()
   expect(await readFile(mcpPath, "utf8")).toBe(original);
 });
 
+test("init omits llm when the user config is already complete", async () => {
+  const root = await createProject("widget-factory");
+  const home = await mkdtemp(join(tmpdir(), "qa-init-home-"));
+  roots.push(home);
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(home, { recursive: true });
+  await writeFile(
+    userConfigPathFor(home),
+    JSON.stringify({
+      llm: {
+        provider: "openai",
+        model: "user-model",
+        apiKeyEnv: "USER_LLM_API_KEY",
+        timeoutMs: 1500,
+      },
+    }),
+  );
+
+  const result = await runInit(root, [], home);
+  const yaml = await readFile(join(root, ".autonomous-qa", "config.yml"), "utf8");
+
+  expect(result.code).toBe(0);
+  expect(yaml).not.toMatch(/^llm:/m);
+  const previousHome = process.env.AUTONOMOUS_QA_HOME;
+  process.env.AUTONOMOUS_QA_HOME = home;
+  try {
+    expect(loadEffectiveConfig(root).config.llm).toMatchObject({
+      provider: "openai",
+      model: "user-model",
+      apiKeyEnv: "USER_LLM_API_KEY",
+      timeoutMs: 1500,
+    });
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.AUTONOMOUS_QA_HOME;
+    } else {
+      process.env.AUTONOMOUS_QA_HOME = previousHome;
+    }
+  }
+});
+
 test("init appears in help via autoload", async () => {
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -206,6 +249,7 @@ test("init appears in help via autoload", async () => {
       "doctor",
       "help",
       "init",
+      "install",
       "mcp",
     ]);
     expect(await main([])).toBe(0);
@@ -216,11 +260,32 @@ test("init appears in help via autoload", async () => {
   }
 });
 
+function userConfigPathFor(home: string): string {
+  const previous = process.env.AUTONOMOUS_QA_HOME;
+  process.env.AUTONOMOUS_QA_HOME = home;
+  try {
+    return userConfigPath();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTONOMOUS_QA_HOME;
+    } else {
+      process.env.AUTONOMOUS_QA_HOME = previous;
+    }
+  }
+}
+
 async function runInit(
   root: string,
   argv: string[] = [],
+  home: string = "",
 ): Promise<{ code: number; logs: string[]; errors: string[] }> {
   const previous = process.cwd();
+  const previousHome = process.env.AUTONOMOUS_QA_HOME;
+  const isolatedHome = home.length > 0 ? home : await mkdtemp(join(tmpdir(), "qa-init-home-"));
+  if (home.length === 0) {
+    roots.push(isolatedHome);
+  }
+  process.env.AUTONOMOUS_QA_HOME = isolatedHome;
   process.chdir(root);
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -236,6 +301,11 @@ async function runInit(
     log.mockRestore();
     error.mockRestore();
     process.chdir(previous);
+    if (previousHome === undefined) {
+      delete process.env.AUTONOMOUS_QA_HOME;
+    } else {
+      process.env.AUTONOMOUS_QA_HOME = previousHome;
+    }
   }
 }
 

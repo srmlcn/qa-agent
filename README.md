@@ -48,55 +48,39 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
 ## Operator path
 
-1. From a checkout, install dependencies and build the package:
+1. From a checkout, install dependencies, build, and install the runtime for every local Cursor workspace:
 
    ```sh
    npm install
    npm run build
+   node dist/cli/main.js install
    ```
 
-   Until a publish issue exists, run the CLI with a local `npm link` or with `node dist/cli/main.js`.
+   `install` copies the built app to `~/.autonomous-qa/app`, installs Chromium under `~/.autonomous-qa/browsers`, and merges a stdio server into `~/.cursor/mcp.json`. The server command is the absolute Node binary that ran `install`, so Cursor does not need `autonomous-qa` on `PATH`. It also copies the agent skill to `~/.cursor/skills/autonomous-qa/SKILL.md`.
 
-2. Create the project files with `autonomous-qa init` or `node dist/cli/main.js init`. Init writes `.autonomous-qa/config.yml` and `.autonomous-qa/flows/`. It appends `.gitignore` entries for `.autonomous-qa/artifacts/` and `.autonomous-qa/runtime/`. It does not ignore `.autonomous-qa/flows/` or `.autonomous-qa/config.yml`.
+   LLM connection fields go in `~/.autonomous-qa/config.json` when that file is missing. The API key value goes in `~/.autonomous-qa/env` (mode `0600`) under the name `llm.apiKeyEnv`. `install` does not print the key. Re-run `install` after a new build. Pass `--force` to replace an existing `autonomous-qa` server entry.
 
-3. Set `llm.provider`, `baseUrl`, and `apiKeyEnv` in `.autonomous-qa/config.yml`. `apiKeyEnv` is the name of an environment variable, such as `COMPANY_LLM_API_KEY`. The key value lives in the environment, not in the file.
+   Reload Cursor after install. Cloud agents do not read `~/.cursor/mcp.json`.
 
-   ```yaml
-   llm:
-     provider: openai-compatible
-     baseUrl: https://llm.company.internal/v1
-     apiKeyEnv: COMPANY_LLM_API_KEY
-   ```
+2. In each repo, create project files with `autonomous-qa init` or `node dist/cli/main.js init`. Init writes `.autonomous-qa/config.yml` and `.autonomous-qa/flows/`. It appends `.gitignore` entries for `.autonomous-qa/artifacts/` and `.autonomous-qa/runtime/`. It does not ignore `.autonomous-qa/flows/` or `.autonomous-qa/config.yml`. When `~/.autonomous-qa/config.json` already has a complete `llm` block, init omits `llm` from the project file so the user settings apply.
 
-4. Init prints this MCP server block. `src/cli/commands/init.ts` writes `"command": "autonomous-qa"` with `"args": ["mcp"]`. That command is on `PATH` only after `npm link`. Cursor cannot start the server until the link exists.
+3. Set `application.baseUrl` and `application.allowedHosts` in `.autonomous-qa/config.yml`. Those fields, `productionAllowed`, and destructive-action policy stay in the repo. User config cannot override them. A user `llm` field overrides the same field in the project file. `apiKeyEnv` is the name of an environment variable. The key value lives in the environment or `~/.autonomous-qa/env`, not in either config file.
+
+4. The user MCP server is:
 
    ```json
    {
      "mcpServers": {
        "autonomous-qa": {
          "type": "stdio",
-         "command": "autonomous-qa",
-         "args": ["mcp"]
+         "command": "/absolute/path/to/node",
+         "args": ["/absolute/path/to/.autonomous-qa/app/dist/cli/main.js", "mcp"]
        }
      }
    }
    ```
 
-   `autonomous-qa init --install-mcp` writes that same server into `.cursor/mcp.json`.
-
-   A checkout started with `node dist/cli/main.js` uses this server when the `autonomous-qa` binary is not linked. The `args` path is the absolute path to `dist/cli/main.js` in the checkout. `init` writes the `autonomous-qa` command above, so replace the server entry by hand when you use this form:
-
-   ```json
-   {
-     "mcpServers": {
-       "autonomous-qa": {
-         "type": "stdio",
-         "command": "node",
-         "args": ["/absolute/path/to/checkout/dist/cli/main.js", "mcp"]
-       }
-     }
-   }
-   ```
+   `install` writes that entry with `envFile` pointed at `~/.autonomous-qa/env`. A project `.cursor/mcp.json` server named `autonomous-qa` overrides it. `autonomous-qa init --install-mcp` still writes a project server that uses the `autonomous-qa` command, for a team that commits one. That command is not on `PATH` until it is linked. Prefer the user install for a personal setup.
 
 5. Capture an auth profile with `autonomous-qa auth capture --project <project-id> --profile <profile> --url <start-url>`. The command is implemented in `src/cli/commands/auth.ts`. It writes the profile file to `<home>/auth/<project-id>/<profile>.json`. Home defaults to `~/.autonomous-qa` and can be overridden with `AUTONOMOUS_QA_HOME`.
 

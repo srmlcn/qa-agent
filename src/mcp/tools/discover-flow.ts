@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { loadProjectConfig } from "../../config/load-project.js";
 import type { RunStatus } from "../../evidence/types.js";
 import type { FlowSpec } from "../../flows/schema.js";
 import { discoverFlow } from "../../orchestrator/discovery.js";
 import { createProvider } from "../../stagehand/provider.js";
 import type { McpTool } from "../load-tools.js";
+import { loadToolConfig } from "../project-root.js";
 
 const schema = z.object({
   objective: z.string().min(1),
@@ -12,6 +12,7 @@ const schema = z.object({
   authProfile: z.string().min(1).optional(),
   constraints: z.array(z.string().min(1)).optional(),
   maxSteps: z.number().int().positive().optional(),
+  projectRoot: z.string().min(1).optional(),
 });
 
 export type DiscoverFlowOutput = {
@@ -32,8 +33,7 @@ export const tool = {
   schema,
   async handler(args: unknown): Promise<DiscoverFlowOutput> {
     const input = schema.parse(args);
-    const projectRoot = process.cwd();
-    const config = loadProjectConfig(projectRoot);
+    const { projectRoot, config } = await loadToolConfig(input.projectRoot);
     const provider = createProvider(config.llm);
     const discovered = await discoverFlow({
       id: flowIdFromObjective(input.objective),

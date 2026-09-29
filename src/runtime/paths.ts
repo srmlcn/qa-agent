@@ -51,6 +51,38 @@ export function projectsDir(): string {
   return join(homeDir(), "projects");
 }
 
+export function appDir(): string {
+  return join(homeDir(), "app");
+}
+
+export function userEnvPath(): string {
+  return join(homeDir(), "env");
+}
+
+export function projectRegistryPath(): string {
+  return join(projectsDir(), "registry.json");
+}
+
+/**
+ * Cursor user config. `AUTONOMOUS_QA_CURSOR_DIR` overrides `~/.cursor` so
+ * tests do not write the machine Cursor directory.
+ */
+export function cursorDir(): string {
+  const configured = process.env.AUTONOMOUS_QA_CURSOR_DIR;
+  if (configured !== undefined && configured.length > 0) {
+    return resolve(configured);
+  }
+  return join(homedir(), ".cursor");
+}
+
+export function userMcpPath(): string {
+  return join(cursorDir(), "mcp.json");
+}
+
+export function userSkillPath(): string {
+  return join(cursorDir(), "skills", "autonomous-qa", "SKILL.md");
+}
+
 export function ensureHomeLayout(): void {
   ensurePrivateDir(homeDir());
   for (const name of LAYOUT_DIRECTORY_NAMES) {

@@ -93,6 +93,7 @@ test("execute tool schemas have no model or objective field", () => {
     "authProfile",
     "headed",
     "collectTrace",
+    "projectRoot",
   ]);
   expect(flowShape.flowId).toBeInstanceOf(ZodString);
   expect(flowShape.inputs).toBeInstanceOf(ZodDefault);
@@ -106,6 +107,7 @@ test("execute tool schemas have no model or objective field", () => {
     "flowIds",
     "workers",
     "authStrategy",
+    "projectRoot",
   ]);
   expect(suiteShape.flowIds).toBeInstanceOf(ZodArray);
   expect(suiteShape.authStrategy).toBeInstanceOf(ZodOptional);

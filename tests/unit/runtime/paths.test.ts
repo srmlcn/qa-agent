@@ -10,13 +10,19 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
+  appDir,
   authDir,
   browsersDir,
   cacheDir,
+  cursorDir,
   ensureHomeLayout,
   homeDir,
   logsDir,
+  projectRegistryPath,
   projectsDir,
+  userEnvPath,
+  userMcpPath,
+  userSkillPath,
 } from "../../../src/runtime/paths.js";
 
 let home: string;
@@ -74,6 +80,27 @@ test("directories stay under the configured home root", () => {
 
   expect(statSync(home).mode & 0o777).toBe(0o700);
   expect(authDir("project-1")).toBe(join(home, "auth", "project-1"));
+});
+
+test("app, env, and cursor paths stay beside the configured homes", () => {
+  const cursor = mkdtempSync(join(tmpdir(), "autonomous-qa-cursor-"));
+  const previous = process.env.AUTONOMOUS_QA_CURSOR_DIR;
+  process.env.AUTONOMOUS_QA_CURSOR_DIR = cursor;
+  try {
+    expect(appDir()).toBe(join(home, "app"));
+    expect(userEnvPath()).toBe(join(home, "env"));
+    expect(projectRegistryPath()).toBe(join(home, "projects", "registry.json"));
+    expect(cursorDir()).toBe(cursor);
+    expect(userMcpPath()).toBe(join(cursor, "mcp.json"));
+    expect(userSkillPath()).toBe(join(cursor, "skills", "autonomous-qa", "SKILL.md"));
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTONOMOUS_QA_CURSOR_DIR;
+    } else {
+      process.env.AUTONOMOUS_QA_CURSOR_DIR = previous;
+    }
+    rmSync(cursor, { recursive: true, force: true });
+  }
 });
 
 test("projectId ../escape throws", () => {
