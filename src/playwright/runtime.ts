@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import {
   chromium,
   type Browser,
@@ -7,6 +8,7 @@ import {
   type Page,
 } from "playwright";
 import { QaError } from "../errors/qa-error.js";
+import { browsersDir } from "../runtime/paths.js";
 
 const SUPPORTED_BROWSER = "chromium";
 /**
@@ -135,6 +137,10 @@ async function launchChromium(options: StartBrowserOptions): Promise<Browser> {
   const launchOptions: LaunchOptions = {
     headless: options.headless ?? true,
   };
+  const executablePath = installedChromiumExecutable();
+  if (executablePath !== undefined) {
+    launchOptions.executablePath = executablePath;
+  }
   if (options.timeoutMs !== undefined) {
     launchOptions.timeout = options.timeoutMs;
   }
@@ -150,6 +156,35 @@ async function launchChromium(options: StartBrowserOptions): Promise<Browser> {
       });
     }
     throw error;
+  }
+}
+
+/**
+ * Chromium from `PLAYWRIGHT_BROWSERS_PATH` when that variable is set.
+ * Otherwise Chromium already installed under the home browsers directory.
+ * Undefined means that directory has no browser, so launch can use Playwright's cache.
+ */
+export function installedChromiumExecutable(): string | undefined {
+  const configured = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const directory =
+    configured !== undefined && configured.length > 0 ? configured : browsersDir();
+  return executableUnder(directory);
+}
+
+function executableUnder(directory: string): string | undefined {
+  const previous = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = directory;
+  try {
+    const executable = chromium.executablePath();
+    return existsSync(executable) ? executable : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+    } else {
+      process.env.PLAYWRIGHT_BROWSERS_PATH = previous;
+    }
   }
 }
 

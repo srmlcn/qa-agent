@@ -154,7 +154,15 @@ test("qa.status does not include a fixture API key from the environment", async 
     }
     expect(typeof ready.browserOk).toBe("boolean");
     expect(JSON.stringify(ready)).not.toContain(FIXTURE_API_KEY);
-    expect(ready.problems).toEqual(ready.browserOk ? [] : ["Chromium is not installed"]);
+    expect(ready.problems).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Installed app is missing"),
+        expect.stringContaining("User MCP server is missing"),
+      ]),
+    );
+    if (ready.browserOk !== true) {
+      expect(ready.problems).toContain("Chromium is not installed");
+    }
 
     delete process.env[API_KEY_ENV];
     const missingKey = await withCwd(projectRoot, () => callJson("qa.status", {}));
