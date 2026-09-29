@@ -62,6 +62,7 @@ test("a valid project returns configOk true", async () => {
     browserOk: true,
     llmOk: true,
     homeOk: true,
+    ffmpegAvailable: health.ffmpegAvailable,
     problems: [],
   });
   expect(JSON.stringify(health)).not.toContain(FIXTURE_API_KEY);

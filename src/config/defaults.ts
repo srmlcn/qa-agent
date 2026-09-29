@@ -9,6 +9,21 @@ const DEFAULT_STAGEHAND_MAX_STEPS = 30;
 const DEFAULT_MAX_RESPONSE_BODY_BYTES = 262144;
 const DEFAULT_REDACT_HEADERS = ["authorization", "cookie", "set-cookie"] as const;
 const DEFAULT_WORKER_PROFILES: readonly string[] = [];
+const DEFAULT_SCREENSHOT_SETTLE_DELAY_MS = 1500;
+const DEFAULT_SCREENSHOT_LOAD_TIMEOUT_MS = 15_000;
+const DEFAULT_SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS = 5000;
+const DEFAULT_CURSOR_SHOW_ON_ACTIONS = [
+  "hover",
+  "click",
+  "select",
+  "check",
+  "uncheck",
+  "drag",
+  "move",
+] as const;
+const DEFAULT_VIDEO_WIDTH = 1280;
+const DEFAULT_VIDEO_HEIGHT = 720;
+const DEFAULT_FFMPEG_CRF = 23;
 
 export {
   DEFAULT_DESTRUCTIVE_ACTIONS_ALLOWED,
@@ -37,8 +52,46 @@ const STAGEHAND_DEFAULTS: Readonly<Record<string, unknown>> = {
   maxSteps: DEFAULT_STAGEHAND_MAX_STEPS,
 };
 
+const EVIDENCE_SCREENSHOT_OPTIONS_DEFAULTS: Readonly<Record<string, unknown>> = {
+  waitForLoadState: "networkidle",
+  loadTimeoutMs: DEFAULT_SCREENSHOT_LOAD_TIMEOUT_MS,
+  networkIdleTimeoutMs: DEFAULT_SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS,
+  settleDelayMs: DEFAULT_SCREENSHOT_SETTLE_DELAY_MS,
+  animations: "disabled",
+  caret: "initial",
+  fullPage: false,
+};
+
+const EVIDENCE_CURSOR_DEFAULTS: Readonly<Record<string, unknown>> = {
+  mode: "auto",
+  showOnActions: [...DEFAULT_CURSOR_SHOW_ON_ACTIONS],
+  showOnLocatorWait: true,
+  showOnFailure: true,
+  showOnLowSemanticLocator: true,
+  style: "native-arrow",
+};
+
+const EVIDENCE_FFMPEG_DEFAULTS: Readonly<Record<string, unknown>> = {
+  enabled: true,
+  outputFormat: "mp4",
+  crf: DEFAULT_FFMPEG_CRF,
+  preset: "veryfast",
+  keepSourceWebm: false,
+};
+
+const EVIDENCE_VIDEO_DEFAULTS: Readonly<Record<string, unknown>> = {
+  enabled: false,
+  size: { width: DEFAULT_VIDEO_WIDTH, height: DEFAULT_VIDEO_HEIGHT },
+  retainOnPass: false,
+  retainOnFailure: true,
+  ffmpeg: { ...EVIDENCE_FFMPEG_DEFAULTS },
+};
+
 const EVIDENCE_DEFAULTS: Readonly<Record<string, unknown>> = {
   maxResponseBodyBytes: DEFAULT_MAX_RESPONSE_BODY_BYTES,
+  screenshotOptions: { ...EVIDENCE_SCREENSHOT_OPTIONS_DEFAULTS },
+  cursor: { ...EVIDENCE_CURSOR_DEFAULTS },
+  video: { ...EVIDENCE_VIDEO_DEFAULTS },
 };
 
 const SECURITY_DEFAULTS: Readonly<Record<string, unknown>> = {
@@ -112,7 +165,41 @@ export function applyProjectDefaults(input: unknown): unknown {
   withFieldDefaults(result, "playwright", PLAYWRIGHT_DEFAULTS, false);
   withFieldDefaults(result, "stagehand", STAGEHAND_DEFAULTS, false);
   withFieldDefaults(result, "evidence", EVIDENCE_DEFAULTS, false);
+  applyNestedEvidenceDefaults(result);
   withFieldDefaults(result, "security", SECURITY_DEFAULTS, true);
   withFieldDefaults(result, "auth", AUTH_DEFAULTS, true);
   return result;
+}
+
+function applyNestedEvidenceDefaults(result: Record<string, unknown>): void {
+  const evidence = result.evidence;
+  if (!isPlainObject(evidence)) {
+    return;
+  }
+  withFieldDefaults(
+    evidence,
+    "screenshotOptions",
+    EVIDENCE_SCREENSHOT_OPTIONS_DEFAULTS,
+    true,
+  );
+  withFieldDefaults(evidence, "cursor", EVIDENCE_CURSOR_DEFAULTS, true);
+  withFieldDefaults(evidence, "video", EVIDENCE_VIDEO_DEFAULTS, true);
+  const video = evidence.video;
+  if (isPlainObject(video)) {
+    withFieldDefaults(video, "ffmpeg", EVIDENCE_FFMPEG_DEFAULTS, true);
+    const size = video.size;
+    if (!isPlainObject(size)) {
+      video.size = {
+        width: DEFAULT_VIDEO_WIDTH,
+        height: DEFAULT_VIDEO_HEIGHT,
+      };
+    } else {
+      if (size.width === undefined) {
+        size.width = DEFAULT_VIDEO_WIDTH;
+      }
+      if (size.height === undefined) {
+        size.height = DEFAULT_VIDEO_HEIGHT;
+      }
+    }
+  }
 }

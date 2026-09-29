@@ -12,9 +12,82 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Page } from "playwright";
+import type { ProjectConfig } from "../config/schema.js";
 import { QaError } from "../errors/qa-error.js";
-import type { FlowSpec } from "../flows/schema.js";
+import type { FlowSpec, Locator } from "../flows/schema.js";
+import {
+  ensureMouseTracking,
+  injectCursorOverlay,
+  removeCursorOverlay,
+  resolveCursorAnchor,
+} from "../playwright/cursor.js";
 import { homeDir } from "../runtime/paths.js";
+
+export type ScreenshotCaptureContext = {
+  projectEvidence?: ProjectConfig["evidence"];
+  stepAction?: string;
+  stepLocator?: Locator;
+  isFailure?: boolean;
+};
+
+export function resolveScreenshotPlan(
+  evidence: ProjectConfig["evidence"],
+): ProjectConfig["evidence"]["screenshotOptions"] {
+  return evidence.screenshotOptions;
+}
+
+export type ShouldShowCursorInput = {
+  cursor: ProjectConfig["evidence"]["cursor"];
+  stepAction?: string;
+  stepLocator?: Locator;
+  isFailure?: boolean;
+  showCursorOverride?: boolean;
+};
+
+export function shouldShowCursor(input: ShouldShowCursorInput): boolean {
+  if (input.showCursorOverride === true) {
+    return true;
+  }
+  if (input.showCursorOverride === false) {
+    return false;
+  }
+  if (input.cursor.mode === "never") {
+    return false;
+  }
+  if (input.cursor.mode === "always") {
+    return true;
+  }
+  if (input.isFailure === true && input.cursor.showOnFailure) {
+    return true;
+  }
+  const action = input.stepAction;
+  if (
+    action !== undefined &&
+    input.cursor.showOnActions.includes(
+      action as ProjectConfig["evidence"]["cursor"]["showOnActions"][number],
+    )
+  ) {
+    return true;
+  }
+  if (
+    action === "waitFor" &&
+    input.stepLocator !== undefined &&
+    input.cursor.showOnLocatorWait
+  ) {
+    return true;
+  }
+  if (
+    input.cursor.showOnLowSemanticLocator &&
+    isLowSemanticLocator(input.stepLocator)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isLowSemanticLocator(locator?: Locator): boolean {
+  return locator?.type === "css" || locator?.type === "xpath";
+}
 
 /** Step ids used as filenames. Anything else is rejected. */
 const STEP_ID_PATTERN = /^[a-z0-9-]+$/;
@@ -35,6 +108,7 @@ export async function screenshotAfter(
   stepId: string,
   destDir: string,
   evidence: FlowSpec["evidence"],
+  capture?: ScreenshotCaptureContext,
 ): Promise<string | undefined> {
   if (!isListed(evidence, stepId)) {
     return undefined;
@@ -42,9 +116,108 @@ export async function screenshotAfter(
   assertStepFileName(stepId);
   const filePath = assertArtifactPath(join(destDir, `${stepId}.png`));
   mkdirSync(dirname(filePath), { recursive: true });
-  const bytes = await page.screenshot({ type: "png" });
-  writeScreenshotBytes(filePath, bytes);
-  return filePath;
+
+  const projectEvidence = capture?.projectEvidence;
+  const screenshotOptions =
+    projectEvidence === undefined
+      ? undefined
+      : resolveScreenshotPlan(projectEvidence);
+  if (screenshotOptions !== undefined) {
+    await settlePageForScreenshot(page, screenshotOptions);
+  }
+
+  const showCursor =
+    projectEvidence === undefined
+      ? false
+      : shouldShowCursor({
+          cursor: projectEvidence.cursor,
+          stepAction: capture?.stepAction,
+          stepLocator: capture?.stepLocator,
+          isFailure: capture?.isFailure,
+          showCursorOverride: showCursorOverride(evidence, stepId),
+        });
+
+  let captured = false;
+  try {
+    if (showCursor) {
+      await ensureMouseTracking(page);
+      const anchor = await resolveCursorAnchor(page, capture?.stepLocator);
+      if (anchor !== undefined) {
+        await injectCursorOverlay(page, anchor);
+      }
+    }
+    const bytes = await page.screenshot({
+      type: "png",
+      ...(screenshotOptions === undefined
+        ? {}
+        : {
+            animations: screenshotOptions.animations,
+            caret: screenshotOptions.caret,
+            fullPage: screenshotOptions.fullPage,
+          }),
+    });
+    writeScreenshotBytes(filePath, bytes);
+    captured = true;
+    return filePath;
+  } finally {
+    if (showCursor) {
+      await removeCursorOverlay(page).catch(() => {
+        // Screenshot result must not depend on overlay cleanup.
+      });
+    }
+    if (!captured) {
+      removeCreatedFile(filePath);
+    }
+  }
+}
+
+async function settlePageForScreenshot(
+  page: Page,
+  options: ProjectConfig["evidence"]["screenshotOptions"],
+): Promise<void> {
+  try {
+    await page.waitForLoadState("load", { timeout: options.loadTimeoutMs });
+  } catch {
+    // Continue when load does not finish in time.
+  }
+  if (options.waitForLoadState === "networkidle") {
+    try {
+      await page.waitForLoadState("networkidle", {
+        timeout: options.networkIdleTimeoutMs,
+      });
+    } catch {
+      // SPA polling may never reach networkidle.
+    }
+  } else if (options.waitForLoadState === "domcontentloaded") {
+    try {
+      await page.waitForLoadState("domcontentloaded", {
+        timeout: options.loadTimeoutMs,
+      });
+    } catch {
+      // Best effort.
+    }
+  } else if (options.waitForLoadState === "load") {
+    try {
+      await page.waitForLoadState("load", { timeout: options.loadTimeoutMs });
+    } catch {
+      // Best effort.
+    }
+  }
+  if (options.settleDelayMs > 0) {
+    await page.waitForTimeout(options.settleDelayMs);
+  }
+}
+
+function showCursorOverride(
+  evidence: FlowSpec["evidence"],
+  stepId: string,
+): boolean | undefined {
+  const shots = evidence?.screenshots;
+  if (shots === undefined) {
+    return undefined;
+  }
+  const entry = shots.find((shot) => shot.after === stepId);
+  return entry?.showCursor;
 }
 
 /**

@@ -31,6 +31,10 @@ export type StartBrowserOptions = {
    * Forwarded to the context as-is. This module does not resolve auth profiles.
    */
   storageState?: string;
+  recordVideo?: {
+    dir: string;
+    size: { width: number; height: number };
+  };
 };
 
 export type BrowserSession = {
@@ -104,7 +108,7 @@ export async function startBrowser(
       throw cancelled();
     }
 
-    context = await launched.newContext(contextOptions(options.storageState));
+    context = await launched.newContext(contextOptions(options));
     applyTimeout(context, options.timeoutMs);
     if (closeRequested || signal?.aborted) {
       await close();
@@ -149,11 +153,15 @@ async function launchChromium(options: StartBrowserOptions): Promise<Browser> {
   }
 }
 
-function contextOptions(storageState: string | undefined): BrowserContextOptions {
-  if (storageState === undefined) {
-    return {};
+function contextOptions(options: StartBrowserOptions): BrowserContextOptions {
+  const contextOptions: BrowserContextOptions = {};
+  if (options.storageState !== undefined) {
+    contextOptions.storageState = options.storageState;
   }
-  return { storageState };
+  if (options.recordVideo !== undefined) {
+    contextOptions.recordVideo = options.recordVideo;
+  }
+  return contextOptions;
 }
 
 function applyTimeout(

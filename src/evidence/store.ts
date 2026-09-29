@@ -40,12 +40,14 @@ const RUN_ID_PATTERN = /^[a-zA-Z0-9-]{8,80}$/;
 export type ArtifactPaths = {
   screenshots: readonly string[];
   trace?: string;
+  video?: string;
 };
 
 /** Absolute paths for in-process readers. Do not serialize this object. */
 export type AbsoluteArtifactPaths = {
   screenshots: string[];
   trace?: string;
+  video?: string;
 };
 
 type LocatedArtifact = {
@@ -75,13 +77,16 @@ export function attach(
 ): AbsoluteArtifactPaths {
   const located = locateAll(result.runId, paths);
   const trace = located.trace;
+  const video = located.video;
   result.artifacts = {
     screenshots: located.screenshots.map((item) => item.relativePath),
     ...(trace === undefined ? {} : { trace: trace.relativePath }),
+    ...(video === undefined ? {} : { video: video.relativePath }),
   };
   return {
     screenshots: located.screenshots.map((item) => item.absolutePath),
     ...(trace === undefined ? {} : { trace: trace.absolutePath }),
+    ...(video === undefined ? {} : { video: video.absolutePath }),
   };
 }
 
@@ -160,11 +165,16 @@ function authRoots(): string[] {
 function locateAll(
   runId: string,
   paths: ArtifactPaths,
-): { screenshots: LocatedArtifact[]; trace?: LocatedArtifact } {
+): {
+  screenshots: LocatedArtifact[];
+  trace?: LocatedArtifact;
+  video?: LocatedArtifact;
+} {
   assertSafeRunId(runId);
   const inputs = [
     ...paths.screenshots,
     ...(paths.trace === undefined ? [] : [paths.trace]),
+    ...(paths.video === undefined ? [] : [paths.video]),
   ];
   if (inputs.length === 0) {
     return { screenshots: [] };
@@ -182,11 +192,16 @@ function locateAll(
     paths.trace === undefined
       ? undefined
       : locateArtifact(runDir, paths.trace);
+  const video =
+    paths.video === undefined
+      ? undefined
+      : locateArtifact(runDir, paths.video);
   return {
     screenshots: paths.screenshots.map((artifactPath) =>
       locateArtifact(runDir, artifactPath),
     ),
     ...(trace === undefined ? {} : { trace }),
+    ...(video === undefined ? {} : { video }),
   };
 }
 
@@ -221,6 +236,10 @@ function relativizeArtifacts(runDir: string, result: RunResult): RunResult {
     result.artifacts.trace === undefined
       ? undefined
       : toStoredArtifactPath(runDir, result.artifacts.trace);
+  const video =
+    result.artifacts.video === undefined
+      ? undefined
+      : toStoredArtifactPath(runDir, result.artifacts.video);
   return {
     runId: result.runId,
     flowId: result.flowId,
@@ -236,6 +255,7 @@ function relativizeArtifacts(runDir: string, result: RunResult): RunResult {
         toStoredArtifactPath(runDir, artifactPath),
       ),
       ...(trace === undefined ? {} : { trace }),
+      ...(video === undefined ? {} : { video }),
     },
     ...(result.failure === undefined ? {} : { failure: result.failure }),
   };
@@ -469,9 +489,11 @@ function redactPageError(record: PageErrorRecord): PageErrorRecord {
 
 function redactArtifacts(artifacts: RunResult["artifacts"]): RunResult["artifacts"] {
   const trace = artifacts.trace;
+  const video = artifacts.video;
   return {
     screenshots: artifacts.screenshots.map(redactText),
     ...(trace === undefined ? {} : { trace: redactText(trace) }),
+    ...(video === undefined ? {} : { video: redactText(video) }),
   };
 }
 
@@ -659,6 +681,11 @@ function parseArtifacts(value: unknown): RunResult["artifacts"] {
     const trace = expectString(value.trace, "artifacts.trace");
     assertRelativeSafe(trace);
     artifacts.trace = trace;
+  }
+  if (value.video !== undefined) {
+    const video = expectString(value.video, "artifacts.video");
+    assertRelativeSafe(video);
+    artifacts.video = video;
   }
   return artifacts;
 }
