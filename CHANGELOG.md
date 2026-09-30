@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/srmlcn/qa-agent/compare/v1.1.0...v1.1.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **scripts:** install prod deps before cli ([8bc833d](https://github.com/srmlcn/qa-agent/commit/8bc833db05ebd4a8e8a6ac9ee648e05261d0d5be))
+
 # [1.1.0](https://github.com/srmlcn/qa-agent/compare/v1.0.0...v1.1.0) (2026-09-30)
 
 
