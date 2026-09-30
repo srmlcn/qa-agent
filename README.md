@@ -48,7 +48,19 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
 ## Operator path
 
-1. From a checkout, install dependencies, build, and install the runtime for every local Cursor workspace:
+1. Install the latest release into the environment Cursor uses for the workspace. Node.js 22 or newer must already be on `PATH`. The repository is private, so the token needs contents read on `srmlcn/qa-agent`.
+
+   ```sh
+   curl -fsSL \
+     -H "Authorization: Bearer $GITHUB_TOKEN" \
+     -H "Accept: application/vnd.github.raw+json" \
+     https://api.github.com/repos/srmlcn/qa-agent/contents/scripts/install.sh \
+     | sh
+   ```
+
+   `GH_TOKEN` is accepted in place of `GITHUB_TOKEN`. The script downloads `autonomous-qa.tgz` from the latest GitHub release and runs `install`. It does not print the token.
+
+   From a checkout, the same install is:
 
    ```sh
    npm install
