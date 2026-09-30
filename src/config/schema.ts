@@ -21,15 +21,6 @@ export const LLM_PROVIDERS = [
   "anthropic",
   "xai",
 ] as const;
-export const REASONING_EFFORTS = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
 export const PLAYWRIGHT_BROWSERS = ["chromium"] as const;
 export const EVIDENCE_SCREENSHOT_MODES = ["checkpoints"] as const;
 export const EVIDENCE_TRACE_MODES = ["on-failure", "off"] as const;
@@ -156,8 +147,6 @@ export const llmSchema = z
     apiKeyEnv: z.string().regex(ENV_VAR_NAME_PATTERN),
     timeoutMs: z.number().int().positive(),
     headers: z.record(z.string()).optional(),
-    /** Overrides the provider client's reasoning-effort default. */
-    reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
   })
   .strict();
 

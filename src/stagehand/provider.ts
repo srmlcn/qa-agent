@@ -22,7 +22,6 @@ export type LlmProvider = {
   timeoutMs: number;
   maxRetries: number;
   apiKeyEnv: string;
-  reasoningEffort?: LlmConfig["reasoningEffort"];
 };
 
 /** Same fields as {@link LlmProvider}, without the API key. */
@@ -58,9 +57,6 @@ export function createProvider(config: LlmConfig): LlmProvider {
     timeoutMs: config.timeoutMs,
     maxRetries: DEFAULT_MAX_RETRIES,
     apiKeyEnv: config.apiKeyEnv,
-    ...(config.reasoningEffort === undefined
-      ? {}
-      : { reasoningEffort: config.reasoningEffort }),
   };
 }
 
@@ -80,9 +76,6 @@ export function describeProvider(provider: LlmProvider): LlmProviderDescription 
     timeoutMs: provider.timeoutMs,
     maxRetries: provider.maxRetries,
     apiKeyEnv: provider.apiKeyEnv,
-    ...(provider.reasoningEffort === undefined
-      ? {}
-      : { reasoningEffort: provider.reasoningEffort }),
     apiKeyPresent: apiKey !== undefined,
   };
 }

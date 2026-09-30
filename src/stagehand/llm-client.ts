@@ -98,9 +98,6 @@ function stagehandModelOptions(
       apiKey,
       baseURL: provider.baseUrl,
       headers: stagehandHeaders(provider.headers),
-      ...(provider.reasoningEffort === undefined
-        ? {}
-        : { reasoningEffort: provider.reasoningEffort }),
     },
   };
 }

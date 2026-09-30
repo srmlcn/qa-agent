@@ -342,7 +342,7 @@ llm:
   apiKeyEnv: COMPANY_LLM_API_KEY
 ```
 
-`openai-compatible` uses the custom chat-completions client. `baseUrl` is required. The request carries chat-completions fields a generic compatible server accepts. OpenAI-only parameters are omitted unless the configuration sets them.
+`openai-compatible` uses the custom chat-completions client. `baseUrl` is required. The request carries chat-completions fields a generic compatible server accepts. The runtime does not add OpenAI-only parameters such as reasoning effort.
 
 OpenAI, through Stagehand's client:
 
@@ -353,7 +353,7 @@ llm:
   apiKeyEnv: OPENAI_API_KEY
 ```
 
-`openai` uses Stagehand's OpenAI client. The runtime must not substitute the custom chat-completions client for it. That OpenAI client owns OpenAI request defaults. For a GPT-5 minor model that is not Codex, the default reasoning effort is `none`, so the model returns assistant content instead of an empty completion. Optional `reasoningEffort` overrides that default.
+`openai` uses Stagehand's OpenAI client. The runtime must not substitute the custom chat-completions client for it, and it must not set or override reasoning effort. Stagehand's OpenAI client owns that default on structured `createChatCompletion`. For a GPT-5 minor model that is not Codex, that client uses `none`.
 
 Any other provider Stagehand implements uses Stagehand's client for that provider in the same way. `anthropic` uses Stagehand's Anthropic client. `xai` uses Stagehand's xAI client. A Grok model is an `xai` model name, not a provider. The custom chat-completions client is only for `openai-compatible`.
 
@@ -367,7 +367,6 @@ The provider abstraction must support:
 - Retry policy.
 - Stagehand's client for a named provider.
 - The custom chat-completions client for `openai-compatible`.
-- Optional reasoning effort, applied by the client that owns the request.
 - Provider health check.
 
 FlowSpec and Playwright replay must not depend on which vendor served discovery. The Stagehand adapter selects the vendor client. The compiled flow does not name that vendor.

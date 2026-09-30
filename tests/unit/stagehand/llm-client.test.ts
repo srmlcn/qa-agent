@@ -142,7 +142,6 @@ test("openai uses Stagehand's OpenAI client", async () => {
       model: "gpt-5.4",
       baseUrl: "https://gateway.example/v1/",
       headers: { "X-Tenant": "acme" },
-      reasoningEffort: "low",
     }),
   );
   const stagehand = createStagehand(
@@ -156,8 +155,8 @@ test("openai uses Stagehand's OpenAI client", async () => {
       modelName: "openai/gpt-5.4",
       baseURL: "https://gateway.example/v1/",
       headers: { "X-Tenant": "acme" },
-      reasoningEffort: "low",
     });
+    expect(opts.model).not.toHaveProperty("reasoningEffort");
     const client = nativeClient(stagehand);
     expect(client.type).toBe("aisdk");
     expect(client.modelName).toBe("gpt-5.4");
