@@ -19,7 +19,7 @@ export const LLM_PROVIDERS = [
   "openai-compatible",
   "openai",
   "anthropic",
-  "grok",
+  "xai",
 ] as const;
 export const REASONING_EFFORTS = [
   "none",

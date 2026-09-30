@@ -4,7 +4,7 @@ import { QaError } from "../errors/qa-error.js";
 const DEFAULT_BASE_URL = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
-  grok: "https://api.x.ai/v1",
+  xai: "https://api.x.ai/v1",
 } as const;
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MAX_RETRIES = 2;
@@ -39,7 +39,7 @@ export type ProviderCheckResult =
 
 /**
  * Builds a provider description from effective LLM config.
- * `openai`, `anthropic`, and `grok` use their provider default base URL when none is set.
+ * `openai`, `anthropic`, and `xai` use their provider default base URL when none is set.
  * An `openai-compatible` config with no base URL throws `LLM_PROVIDER_UNAVAILABLE`.
  * The API key is read from `process.env[apiKeyEnv]` and added only as
  * `Authorization` on the returned headers. A missing or empty environment

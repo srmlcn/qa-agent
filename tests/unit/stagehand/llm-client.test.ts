@@ -196,11 +196,11 @@ test("anthropic uses Stagehand's Anthropic client", async () => {
   }
 });
 
-test("grok uses Stagehand's xAI client", async () => {
+test("xai uses Stagehand's xAI client", async () => {
   process.env[API_KEY_ENV] = API_KEY;
   const provider = createProvider(
     llmConfig({
-      provider: "grok",
+      provider: "xai",
       model: "grok-4",
       baseUrl: undefined,
     }),

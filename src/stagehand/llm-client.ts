@@ -9,13 +9,6 @@ import type { Browser } from "playwright";
 import { QaError } from "../errors/qa-error.js";
 import type { LlmProvider } from "./provider.js";
 
-/** Stagehand provider id for each named provider. Grok uses Stagehand's xAI client. */
-const STAGEHAND_PROVIDER_PREFIX = {
-  openai: "openai",
-  anthropic: "anthropic",
-  grok: "xai",
-} as const;
-
 /**
  * Chat-completions client for `openai-compatible` only.
  * Named providers use Stagehand's client inside {@link createStagehand}.
@@ -95,7 +88,7 @@ function stagehandModelOptions(
   }
 
   const apiKey = requireApiKey(provider);
-  const prefix = STAGEHAND_PROVIDER_PREFIX[provider.provider];
+  const prefix = provider.provider;
   const modelName = provider.model.startsWith(`${prefix}/`)
     ? provider.model
     : `${prefix}/${provider.model}`;

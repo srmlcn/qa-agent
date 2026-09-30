@@ -65,7 +65,7 @@ test("openai defaults the base URL and retry count", () => {
   expect(provider.headers.Authorization).toBeUndefined();
 });
 
-test("anthropic and grok default their provider base URLs", () => {
+test("anthropic and xai default their provider base URLs", () => {
   const anthropic = createProvider(
     llmConfig({
       provider: "anthropic",
@@ -73,18 +73,18 @@ test("anthropic and grok default their provider base URLs", () => {
       baseUrl: undefined,
     }),
   );
-  const grok = createProvider(
+  const xai = createProvider(
     llmConfig({
-      provider: "grok",
+      provider: "xai",
       model: "grok-4",
       baseUrl: undefined,
     }),
   );
 
   expect(anthropic.baseUrl).toBe("https://api.anthropic.com/v1");
-  expect(grok.baseUrl).toBe("https://api.x.ai/v1");
+  expect(xai.baseUrl).toBe("https://api.x.ai/v1");
   expect(anthropic.headers.Authorization).toBeUndefined();
-  expect(grok.headers.Authorization).toBeUndefined();
+  expect(xai.headers.Authorization).toBeUndefined();
 });
 
 test("anthropic health checks use the x-api-key header", async () => {

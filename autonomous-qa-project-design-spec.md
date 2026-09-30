@@ -355,7 +355,7 @@ llm:
 
 `openai` uses Stagehand's OpenAI client. The runtime must not substitute the custom chat-completions client for it. That OpenAI client owns OpenAI request defaults. For a GPT-5 minor model that is not Codex, the default reasoning effort is `none`, so the model returns assistant content instead of an empty completion. Optional `reasoningEffort` overrides that default.
 
-Any other provider Stagehand implements uses Stagehand's client for that provider in the same way. `anthropic` uses Stagehand's Anthropic client. `grok` uses Stagehand's xAI client. The custom chat-completions client is only for `openai-compatible`.
+Any other provider Stagehand implements uses Stagehand's client for that provider in the same way. `anthropic` uses Stagehand's Anthropic client. `xai` uses Stagehand's xAI client. A Grok model is an `xai` model name, not a provider. The custom chat-completions client is only for `openai-compatible`.
 
 The provider abstraction must support:
 
