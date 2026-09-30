@@ -48,17 +48,13 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
 ## Operator path
 
-1. Install the latest release into the environment Cursor uses for the workspace. Node.js 22 or newer must already be on `PATH`. The repository is private, so the token needs contents read on `srmlcn/qa-agent`.
+1. Install the latest release into the environment Cursor uses for the workspace. Node.js 22 or newer must already be on `PATH`.
 
    ```sh
-   curl -fsSL \
-     -H "Authorization: Bearer $GITHUB_TOKEN" \
-     -H "Accept: application/vnd.github.raw+json" \
-     https://api.github.com/repos/srmlcn/qa-agent/contents/scripts/install.sh \
-     | sh
+   curl -fsSL https://raw.githubusercontent.com/srmlcn/qa-agent/main/scripts/install.sh | sh
    ```
 
-   `GH_TOKEN` is accepted in place of `GITHUB_TOKEN`. The script downloads `autonomous-qa.tgz` from the latest GitHub release and runs `install`. It does not print the token.
+   The script asks whether to install into `~/.autonomous-qa`. Answer `n` to type another absolute path. A leading `~/` is expanded. Without a terminal, it uses `~/.autonomous-qa`. `sh install.sh /absolute/path` selects that path and skips the question. The script downloads `autonomous-qa.tgz` from the latest GitHub release and runs `install`.
 
    From a checkout, the same install is:
 
@@ -68,9 +64,9 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
    node dist/cli/main.js install
    ```
 
-   `install` copies the built app to `~/.autonomous-qa/app`, installs Chromium under `~/.autonomous-qa/browsers`, and merges a stdio server into `~/.cursor/mcp.json`. The server command is the absolute Node binary that ran `install`, so Cursor does not need `autonomous-qa` on `PATH`. It also copies the agent skill to `~/.cursor/skills/autonomous-qa/SKILL.md`.
+   `install` copies the built app to `<install-dir>/app` and Chromium to `<install-dir>/browsers`. The default install directory is `~/.autonomous-qa`. It merges a stdio server into `~/.cursor/mcp.json`. The server command is the absolute Node binary that ran `install`, so Cursor does not need `autonomous-qa` on `PATH`. It also copies the agent skill to `~/.cursor/skills/autonomous-qa/SKILL.md`.
 
-   LLM connection fields go in `~/.autonomous-qa/config.json` when that file is missing. The API key value goes in `~/.autonomous-qa/env` (mode `0600`) under the name `llm.apiKeyEnv`. `install` does not print the key. Re-run `install` after a new build. Pass `--force` to replace an existing `autonomous-qa` server entry.
+   LLM connection fields go in `<install-dir>/config.json` when that file is missing. The API key value goes in `<install-dir>/env` (mode `0600`) under the name `llm.apiKeyEnv`. `install` does not print the key. Re-run `install` after a new build. Pass `--force` to replace an existing `autonomous-qa` server entry.
 
    Reload Cursor after install. Cloud agents do not read `~/.cursor/mcp.json`.
 
