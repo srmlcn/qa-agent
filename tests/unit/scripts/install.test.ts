@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 
 const script = "scripts/install.sh";
@@ -73,6 +73,45 @@ test("answering y keeps the default installation path", () => {
   expect(result.output).not.toContain("Installation path:");
 });
 
+test("production dependencies are installed before the CLI starts", () => {
+  const home = makeHome();
+  const result = runWithoutTerminal([], home);
+  const lines = readFileSync(join(home, "install-command-log"), "utf8").trim().split("\n");
+  const npmIndex = lines.findIndex((line) => line.startsWith("npm "));
+  const installIndex = lines.findIndex((line) => line.includes("/dist/cli/main.js"));
+  const cwd = lines[npmIndex + 1]?.slice("cwd ".length);
+
+  expect(result.status).toBe(0);
+  expect(lines[npmIndex]).toBe("npm ci --omit=dev --ignore-scripts --no-audit --no-fund");
+  expect(cwd).toBeTruthy();
+  expect(installIndex).toBeGreaterThan(npmIndex);
+  expect(lines[installIndex]).toBe(`node ${cwd}/dist/cli/main.js install`);
+});
+
+test("install.sh refuses to run without npm", () => {
+  const home = makeHome();
+  const bin = mkdtempSync(join(tmpdir(), "qa-install-node-"));
+  scratchDirs.push(bin);
+  symlinkSync(process.execPath, join(bin, "node"));
+  const pathWithoutNpm = (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter((dir) => dir.length > 0 && !existsSync(join(dir, "npm")))
+    .join(delimiter);
+  const result = spawnSync("setsid", ["sh", script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: home,
+      AUTONOMOUS_QA_HOME: "",
+      PATH: `${bin}${delimiter}${pathWithoutNpm}`,
+    },
+  });
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("npm is required.");
+  expect(result.stderr).not.toContain("releases/latest/download");
+});
+
 function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), "qa-install-home-"));
   scratchDirs.push(home);
@@ -119,14 +158,20 @@ function testEnv(home: string): NodeJS.ProcessEnv {
     join(packageDir, "dist", "cli", "main.js"),
     "console.log(process.env.AUTONOMOUS_QA_HOME);\n",
   );
+  writeFileSync(join(packageDir, "package.json"), '{"name":"autonomous-qa","private":true}\n');
+  writeFileSync(join(packageDir, "package-lock.json"), '{"lockfileVersion":3}\n');
   const tarball = join(scratch, "autonomous-qa.tgz");
-  const packed = spawnSync("tar", ["-czf", tarball, "-C", packageDir, "dist"], {
-    encoding: "utf8",
-  });
+  const packed = spawnSync(
+    "tar",
+    ["-czf", tarball, "-C", packageDir, "dist", "package.json", "package-lock.json"],
+    { encoding: "utf8" },
+  );
   if (packed.status !== 0) {
     throw new Error(packed.stderr);
   }
   writeFileSync(join(bin, "curl"), curlStub(tarball), { mode: 0o755 });
+  writeFileSync(join(bin, "npm"), npmStub(), { mode: 0o755 });
+  writeFileSync(join(bin, "node"), nodeStub(process.execPath), { mode: 0o755 });
   return {
     ...process.env,
     HOME: home,
@@ -151,6 +196,39 @@ for arg in "$@"; do
   prev="$arg"
 done
 cp ${shellQuote(tarball)} "$out"
+`;
+}
+
+function npmStub(): string {
+  return `#!/bin/sh
+log="\${HOME}/install-command-log"
+{
+  printf 'npm'
+  for arg in "$@"; do
+    printf ' %s' "$arg"
+  done
+  printf '\\n'
+  printf 'cwd %s\\n' "$PWD"
+} >> "$log"
+if [ ! -f "$PWD/package.json" ] || [ ! -f "$PWD/package-lock.json" ] || [ ! -f "$PWD/dist/cli/main.js" ]; then
+  echo "production install ran before the release was extracted" >&2
+  exit 1
+fi
+exit 0
+`;
+}
+
+function nodeStub(realNode: string): string {
+  return `#!/bin/sh
+log="\${HOME}/install-command-log"
+{
+  printf 'node'
+  for arg in "$@"; do
+    printf ' %s' "$arg"
+  done
+  printf '\\n'
+} >> "$log"
+exec ${shellQuote(realNode)} "$@"
 `;
 }
 
