@@ -48,7 +48,7 @@ Conventional commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `cho
 
 ## Operator path
 
-1. Install the latest release into the environment Cursor uses for the workspace. Node.js 22 or newer must already be on `PATH`.
+1. Install the latest release into the environment Cursor uses for the workspace. Node.js 22 or newer and npm must already be on `PATH`.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/srmlcn/qa-agent/main/scripts/install.sh | sh
