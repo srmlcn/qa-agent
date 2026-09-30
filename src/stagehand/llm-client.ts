@@ -10,24 +10,19 @@ import { QaError } from "../errors/qa-error.js";
 import type { LlmProvider } from "./provider.js";
 
 /**
- * Stagehand client for the configured provider.
- * Model, base URL, headers, and timeout come from `provider`.
+ * Chat-completions client for `openai-compatible` only.
+ * Named providers use Stagehand's client inside {@link createStagehand}.
  * The API key is read from `process.env[provider.apiKeyEnv]`.
- *
- * `CustomOpenAIClient` takes the model name. The OpenAI client it wraps
- * takes `baseURL` and `defaultHeaders`, including a non-OpenAI base URL,
- * so this module does not subclass `LLMClient`. `openai` and
- * `openai-compatible` are chosen only by `provider.provider`.
  */
 export function createStagehandClient(provider: LlmProvider): LLMClient {
-  const apiKey = readApiKey(provider.apiKeyEnv);
-  if (apiKey === undefined) {
+  if (provider.provider !== "openai-compatible") {
     throw new QaError({
       code: "LLM_PROVIDER_UNAVAILABLE",
-      message: "The model provider API key is not set.",
+      message: `The ${provider.provider} provider uses Stagehand's client.`,
     });
   }
 
+  const apiKey = requireApiKey(provider);
   const client = new OpenAI({
     apiKey,
     baseURL: provider.baseUrl,
@@ -36,22 +31,22 @@ export function createStagehandClient(provider: LlmProvider): LLMClient {
     maxRetries: provider.maxRetries,
     fetch: guardedFetch(apiKey),
   });
+  return new CustomOpenAIClient({
+    modelName: provider.model,
+    client,
+  });
+}
 
-  switch (provider.provider) {
-    case "openai":
-    case "openai-compatible":
-      return new CustomOpenAIClient({
-        modelName: provider.model,
-        client,
-      });
-    default: {
-      const unsupported: never = provider.provider;
-      throw new QaError({
-        code: "LLM_PROVIDER_UNAVAILABLE",
-        message: `The model provider "${String(unsupported)}" is not supported.`,
-      });
-    }
+/** Throws `LLM_PROVIDER_UNAVAILABLE` when the provider API key is missing. */
+export function requireApiKey(provider: LlmProvider): string {
+  const apiKey = readApiKey(provider.apiKeyEnv);
+  if (apiKey === undefined) {
+    throw new QaError({
+      code: "LLM_PROVIDER_UNAVAILABLE",
+      message: "The model provider API key is not set.",
+    });
   }
+  return apiKey;
 }
 
 /**
@@ -73,14 +68,52 @@ export function createStagehand(
     verbose: 0,
     disableAPI: true,
     logger: () => undefined,
-    llmClient: createStagehandClient(provider),
-    model: provider.model,
+    ...stagehandModelOptions(provider),
   };
   const endpoint = browserCdpUrl(browser);
   if (endpoint !== undefined) {
     options.localBrowserLaunchOptions = { cdpUrl: endpoint };
   }
   return new Stagehand(options);
+}
+
+function stagehandModelOptions(
+  provider: LlmProvider,
+): Pick<V3Options, "llmClient" | "model"> {
+  if (provider.provider === "openai-compatible") {
+    return {
+      llmClient: createStagehandClient(provider),
+      model: provider.model,
+    };
+  }
+
+  const apiKey = requireApiKey(provider);
+  const prefix = provider.provider;
+  const modelName = provider.model.startsWith(`${prefix}/`)
+    ? provider.model
+    : `${prefix}/${provider.model}`;
+  return {
+    model: {
+      modelName,
+      apiKey,
+      baseURL: provider.baseUrl,
+      headers: stagehandHeaders(provider.headers),
+    },
+  };
+}
+
+function stagehandHeaders(
+  headers: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower === "authorization" || lower === "x-api-key") {
+      continue;
+    }
+    result[name] = value;
+  }
+  return result;
 }
 
 function browserCdpUrl(browser: Browser): string | undefined {

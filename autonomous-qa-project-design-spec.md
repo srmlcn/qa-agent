@@ -5,7 +5,7 @@
 **Runtime:** Local Node.js/TypeScript package  
 **Primary browser executor:** Playwright  
 **Exploration engine:** Stagehand  
-**Stagehand model source:** Configurable hosted or internal LLM endpoint  
+**Stagehand model source:** Stagehand's provider client, or a custom OpenAI-compatible endpoint  
 **Primary goal:** Autonomously discover, compile, execute, and evaluate user-facing flows for a feature branch or bug fix.
 
 ---
@@ -330,7 +330,9 @@ Long-term flow storage
 
 The QA runtime must wrap Stagehand behind an internal provider abstraction.
 
-Required provider modes:
+A custom OpenAI-compatible endpoint is required. It is not the only supported mode. Every provider for which Stagehand ships a client is also a supported mode, and that mode uses Stagehand's client for the provider.
+
+Custom endpoint:
 
 ```yaml
 llm:
@@ -340,27 +342,34 @@ llm:
   apiKeyEnv: COMPANY_LLM_API_KEY
 ```
 
-or:
+`openai-compatible` uses the custom chat-completions client. `baseUrl` is required. The request carries chat-completions fields a generic compatible server accepts. The runtime does not add OpenAI-only parameters such as reasoning effort.
+
+OpenAI, through Stagehand's client:
 
 ```yaml
 llm:
   provider: openai
-  model: configured-model
+  model: gpt-5.4
   apiKeyEnv: OPENAI_API_KEY
 ```
+
+`openai` uses Stagehand's OpenAI client. The runtime must not substitute the custom chat-completions client for it, and it must not set or override reasoning effort. Stagehand's OpenAI client owns that default on structured `createChatCompletion`. For a GPT-5 minor model that is not Codex, that client uses `none`.
+
+Any other provider Stagehand implements uses Stagehand's client for that provider in the same way. `anthropic` uses Stagehand's Anthropic client. `xai` uses Stagehand's xAI client. A Grok model is an `xai` model name, not a provider. The custom chat-completions client is only for `openai-compatible`.
 
 The provider abstraction must support:
 
 - Model name.
-- Base URL.
+- Base URL. Required for `openai-compatible`. Optional when Stagehand's client has a default endpoint.
 - API key environment variable.
 - Additional headers.
 - Timeout.
 - Retry policy.
-- Optional custom Stagehand `LLMClient`.
+- Stagehand's client for a named provider.
+- The custom chat-completions client for `openai-compatible`.
 - Provider health check.
 
-The system must not hard-code OpenAI, Anthropic, Browserbase, or any other model vendor.
+FlowSpec and Playwright replay must not depend on which vendor served discovery. The Stagehand adapter selects the vendor client. The compiled flow does not name that vendor.
 
 ### Stagehand output handling
 
@@ -1192,7 +1201,8 @@ The first useful release should support:
 - Chromium.
 - Stagehand discovery.
 - Custom OpenAI-compatible LLM server.
-- OpenAI API fallback.
+- Stagehand's OpenAI client for the OpenAI API.
+- Any other provider Stagehand ships a client for, using that client.
 - FlowSpec generation.
 - Flow validation.
 - Deterministic Playwright replay.
@@ -1290,7 +1300,7 @@ Cursor may request parallel work, but Playwright controls actual worker/context 
 
 ### Model provider independence
 
-The internal company model, OpenAI, another hosted provider, or a future local model must be replaceable without changing FlowSpec or Playwright execution.
+The internal company model, OpenAI through Stagehand's client, another Stagehand provider, or a future local model must be replaceable without changing FlowSpec or Playwright execution. The adapter selects the client. The flow does not.
 
 ---
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { z } from "zod";
 import type { LlmConfig } from "../../../src/config/schema.js";
+import type { V3Options } from "@browserbasehq/stagehand";
 import { QaError } from "../../../src/errors/qa-error.js";
 import {
   createStagehand,
@@ -119,40 +120,107 @@ test("a fake fetch returns one structured step and does not use the network", as
   expect(logs.join("\n")).not.toContain(API_KEY);
 });
 
-test("an openai provider sends the provider base URL and model", async () => {
+test("a named provider does not use the custom chat client", () => {
   process.env[API_KEY_ENV] = API_KEY;
   const provider = createProvider(
     llmConfig({
       provider: "openai",
-      model: "configured-model",
-      baseUrl: "https://gateway.example/v1/",
+      model: "gpt-5.4",
+      baseUrl: undefined,
     }),
   );
-  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
-    expect(String(input)).toBe("https://gateway.example/v1/chat/completions");
-    const body = JSON.parse(String(init?.body)) as { model?: string };
-    expect(body.model).toBe("configured-model");
-    return new Response(completionBody(JSON.stringify({ step: "archive" })), {
-      status: 200,
-      headers: { "content-type": "application/json" },
+
+  expect(() => createStagehandClient(provider)).toThrow(QaError);
+  expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+});
+
+test("openai uses Stagehand's OpenAI client", async () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(
+    llmConfig({
+      provider: "openai",
+      model: "gpt-5.4",
+      baseUrl: "https://gateway.example/v1/",
+      headers: { "X-Tenant": "acme" },
+    }),
+  );
+  const stagehand = createStagehand(
+    provider,
+    {} as Parameters<typeof createStagehand>[1],
+  );
+  try {
+    const opts = stagehandOptions(stagehand);
+    expect(opts.llmClient).toBeUndefined();
+    expect(opts.model).toMatchObject({
+      modelName: "openai/gpt-5.4",
+      baseURL: "https://gateway.example/v1/",
+      headers: { "X-Tenant": "acme" },
     });
-  });
-  vi.stubGlobal("fetch", fetchImpl);
+    expect(opts.model).not.toHaveProperty("reasoningEffort");
+    const client = nativeClient(stagehand);
+    expect(client.type).toBe("aisdk");
+    expect(client.modelName).toBe("gpt-5.4");
+    expect(languageProvider(client)).toContain("openai");
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  } finally {
+    await stagehand.close();
+  }
+});
 
-  const client = createStagehandClient(provider);
-  const result = await client.createChatCompletion({
-    options: {
-      messages: [{ role: "user", content: "Archive the project" }],
-      response_model: {
-        name: "Step",
-        schema: z.object({ step: z.string() }),
-      },
-    },
-    logger: () => undefined,
-  });
+test("anthropic uses Stagehand's Anthropic client", async () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(
+    llmConfig({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      baseUrl: undefined,
+    }),
+  );
+  const stagehand = createStagehand(
+    provider,
+    {} as Parameters<typeof createStagehand>[1],
+  );
+  try {
+    const opts = stagehandOptions(stagehand);
+    expect(opts.llmClient).toBeUndefined();
+    expect(opts.model).toMatchObject({
+      modelName: "anthropic/claude-sonnet-4-6",
+      baseURL: "https://api.anthropic.com/v1",
+    });
+    const client = nativeClient(stagehand);
+    expect(client.modelName).toBe("claude-sonnet-4-6");
+    expect(languageProvider(client)).toContain("anthropic");
+  } finally {
+    await stagehand.close();
+  }
+});
 
-  expect(result).toMatchObject({ data: { step: "archive" } });
-  expect(fetchImpl).toHaveBeenCalledTimes(1);
+test("xai uses Stagehand's xAI client", async () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(
+    llmConfig({
+      provider: "xai",
+      model: "grok-4",
+      baseUrl: undefined,
+    }),
+  );
+  const stagehand = createStagehand(
+    provider,
+    {} as Parameters<typeof createStagehand>[1],
+  );
+  try {
+    const opts = stagehandOptions(stagehand);
+    expect(opts.llmClient).toBeUndefined();
+    expect(opts.model).toMatchObject({
+      modelName: "xai/grok-4",
+      baseURL: "https://api.x.ai/v1",
+    });
+    const client = nativeClient(stagehand);
+    expect(client.modelName).toBe("grok-4");
+    expect(languageProvider(client)).toContain("xai");
+  } finally {
+    await stagehand.close();
+  }
 });
 
 test("a missing API key throws without the key and does not call fetch", () => {
@@ -250,6 +318,35 @@ test("no other src file imports Stagehand", () => {
     "stagehand/llm-client.ts",
   ]);
 });
+
+function stagehandOptions(stagehand: object): {
+  llmClient?: unknown;
+  model?: V3Options["model"];
+} {
+  return (stagehand as { opts: { llmClient?: unknown; model?: V3Options["model"] } }).opts;
+}
+
+function nativeClient(stagehand: object): {
+  type?: string;
+  modelName?: string;
+  getLanguageModel?: () => { provider?: string };
+} {
+  return (
+    stagehand as {
+      llmClient?: {
+        type?: string;
+        modelName?: string;
+        getLanguageModel?: () => { provider?: string };
+      };
+    }
+  ).llmClient ?? {};
+}
+
+function languageProvider(client: {
+  getLanguageModel?: () => { provider?: string };
+}): string {
+  return client.getLanguageModel?.().provider ?? "";
+}
 
 function sourceFiles(dir: string): string[] {
   const found: string[] = [];

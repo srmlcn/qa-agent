@@ -227,7 +227,7 @@ test("a schema violation names the file and the field", () => {
 test("an unknown provider fails as POLICY_BLOCKED", () => {
   const yaml = SECTION_7_SAMPLE.replace(
     "provider: openai-compatible",
-    "provider: anthropic",
+    "provider: not-a-provider",
   );
   const error = expectPolicyBlocked(() =>
     loadProjectConfig(writeProjectConfig(yaml)),

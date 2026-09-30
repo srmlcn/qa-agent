@@ -15,7 +15,12 @@ export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-export const LLM_PROVIDERS = ["openai-compatible", "openai"] as const;
+export const LLM_PROVIDERS = [
+  "openai-compatible",
+  "openai",
+  "anthropic",
+  "xai",
+] as const;
 export const PLAYWRIGHT_BROWSERS = ["chromium"] as const;
 export const EVIDENCE_SCREENSHOT_MODES = ["checkpoints"] as const;
 export const EVIDENCE_TRACE_MODES = ["on-failure", "off"] as const;

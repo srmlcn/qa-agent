@@ -65,6 +65,51 @@ test("openai defaults the base URL and retry count", () => {
   expect(provider.headers.Authorization).toBeUndefined();
 });
 
+test("anthropic and xai default their provider base URLs", () => {
+  const anthropic = createProvider(
+    llmConfig({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      baseUrl: undefined,
+    }),
+  );
+  const xai = createProvider(
+    llmConfig({
+      provider: "xai",
+      model: "grok-4",
+      baseUrl: undefined,
+    }),
+  );
+
+  expect(anthropic.baseUrl).toBe("https://api.anthropic.com/v1");
+  expect(xai.baseUrl).toBe("https://api.x.ai/v1");
+  expect(anthropic.headers.Authorization).toBeUndefined();
+  expect(xai.headers.Authorization).toBeUndefined();
+});
+
+test("anthropic health checks use the x-api-key header", async () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(
+    llmConfig({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      baseUrl: undefined,
+    }),
+  );
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    expect(String(input)).toBe("https://api.anthropic.com/v1/models");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-api-key")).toBe(API_KEY);
+    expect(headers.get("anthropic-version")).toBe("2023-06-01");
+    expect(headers.get("authorization")).toBeNull();
+    return new Response(null, { status: 200 });
+  });
+
+  await expect(checkProvider(provider, fetchImpl)).resolves.toEqual({ ok: true });
+  expect(describeProvider(provider).headers["x-api-key"]).toBeUndefined();
+  expect(JSON.stringify(describeProvider(provider))).not.toContain(API_KEY);
+});
+
 test("openai keeps an explicit base URL", () => {
   const provider = createProvider(
     llmConfig({
