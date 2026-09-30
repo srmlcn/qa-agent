@@ -4,7 +4,7 @@ import { assertUrlAllowed } from "../security/hosts.js";
 import { assertStepsRemaining } from "../security/policy.js";
 import { startBrowser } from "../playwright/runtime.js";
 import type { DiscoveryClient } from "./fake-client.js";
-import { createStagehand, createStagehandClient } from "./llm-client.js";
+import { createStagehand, requireApiKey } from "./llm-client.js";
 import type { LlmProvider } from "./provider.js";
 import {
   fromAgentResult,
@@ -148,7 +148,7 @@ async function runStagehand(
     throw cancelled();
   }
 
-  createStagehandClient(options.provider);
+  requireApiKey(options.provider);
   const browserSession = await startBrowser({
     browser: options.config.playwright.browser,
     headless: options.config.playwright.headless,

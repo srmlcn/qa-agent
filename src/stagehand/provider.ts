@@ -1,7 +1,12 @@
 import type { LlmConfig } from "../config/schema.js";
 import { QaError } from "../errors/qa-error.js";
 
-const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_BASE_URL = {
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+  grok: "https://api.x.ai/v1",
+} as const;
+const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MAX_RETRIES = 2;
 const RETRY_STATUSES = new Set([429, 503]);
 
@@ -17,6 +22,7 @@ export type LlmProvider = {
   timeoutMs: number;
   maxRetries: number;
   apiKeyEnv: string;
+  reasoningEffort?: LlmConfig["reasoningEffort"];
 };
 
 /** Same fields as {@link LlmProvider}, without the API key. */
@@ -33,7 +39,7 @@ export type ProviderCheckResult =
 
 /**
  * Builds a provider description from effective LLM config.
- * An `openai` config with no base URL uses `https://api.openai.com/v1`.
+ * `openai`, `anthropic`, and `grok` use their provider default base URL when none is set.
  * An `openai-compatible` config with no base URL throws `LLM_PROVIDER_UNAVAILABLE`.
  * The API key is read from `process.env[apiKeyEnv]` and added only as
  * `Authorization` on the returned headers. A missing or empty environment
@@ -44,10 +50,17 @@ export function createProvider(config: LlmConfig): LlmProvider {
     provider: config.provider,
     model: config.model,
     baseUrl: resolveBaseUrl(config),
-    headers: headersWithKey(config.headers, readApiKey(config.apiKeyEnv)),
+    headers: headersWithKey(
+      config.headers,
+      readApiKey(config.apiKeyEnv),
+      config.provider,
+    ),
     timeoutMs: config.timeoutMs,
     maxRetries: DEFAULT_MAX_RETRIES,
     apiKeyEnv: config.apiKeyEnv,
+    ...(config.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: config.reasoningEffort }),
   };
 }
 
@@ -67,6 +80,9 @@ export function describeProvider(provider: LlmProvider): LlmProviderDescription 
     timeoutMs: provider.timeoutMs,
     maxRetries: provider.maxRetries,
     apiKeyEnv: provider.apiKeyEnv,
+    ...(provider.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: provider.reasoningEffort }),
     apiKeyPresent: apiKey !== undefined,
   };
 }
@@ -86,7 +102,7 @@ export async function checkProvider(
     return { ok: false, code: "LLM_PROVIDER_UNAVAILABLE" };
   }
 
-  const headers = headersWithKey(provider.headers, apiKey);
+  const headers = headersWithKey(provider.headers, apiKey, provider.provider);
   const url = modelsUrl(provider.baseUrl);
   const attempts = provider.maxRetries + 1;
 
@@ -121,8 +137,8 @@ function resolveBaseUrl(config: LlmConfig): string {
   if (config.baseUrl !== undefined && config.baseUrl.length > 0) {
     return config.baseUrl;
   }
-  if (config.provider === "openai") {
-    return OPENAI_DEFAULT_BASE_URL;
+  if (config.provider !== "openai-compatible") {
+    return DEFAULT_BASE_URL[config.provider];
   }
   throw new QaError({
     code: "LLM_PROVIDER_UNAVAILABLE",
@@ -141,18 +157,29 @@ function readApiKey(envName: string): string | undefined {
 function headersWithKey(
   configHeaders: LlmConfig["headers"],
   apiKey: string | undefined,
+  provider: LlmConfig["provider"],
 ): Record<string, string> {
   const headers: Record<string, string> = { ...(configHeaders ?? {}) };
   for (const name of Object.keys(headers)) {
-    if (name.toLowerCase() === "authorization") {
+    if (isCredentialHeader(name)) {
       delete headers[name];
     }
   }
   if (apiKey === undefined) {
     return headers;
   }
+  if (provider === "anthropic") {
+    headers["x-api-key"] = apiKey;
+    headers["anthropic-version"] = ANTHROPIC_VERSION;
+    return headers;
+  }
   headers.Authorization = `Bearer ${apiKey}`;
   return headers;
+}
+
+function isCredentialHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === "authorization" || lower === "x-api-key";
 }
 
 function publicHeaders(
@@ -162,7 +189,7 @@ function publicHeaders(
 ): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() === "authorization") {
+    if (isCredentialHeader(name)) {
       continue;
     }
     result[name] = stripSecrets(value, apiKey, headerKey);
