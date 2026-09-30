@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/srmlcn/qa-agent/compare/v1.0.0...v1.1.0) (2026-09-30)
+
+
+### Features
+
+* **scripts:** prompt for the install path ([7cdcefa](https://github.com/srmlcn/qa-agent/commit/7cdcefa8495043b0c834301dc96398856cdcf4a4))
+
 # 1.0.0 (2026-09-30)
 
 
