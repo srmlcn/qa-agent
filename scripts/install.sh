@@ -17,6 +17,11 @@ if [ "$node_major" -lt 22 ]; then
   exit 1
 fi
 
+if ! command -v npm >/dev/null 2>&1; then
+  echo "npm is required." >&2
+  exit 1
+fi
+
 expand_path() {
   case "$1" in
     "~") printf '%s\n' "$HOME" ;;
@@ -86,4 +91,8 @@ trap 'rm -rf "$workdir"' EXIT
 
 curl -fsSL -o "${workdir}/autonomous-qa.tgz" "$asset_url"
 tar -xzf "${workdir}/autonomous-qa.tgz" -C "$workdir"
+(
+  cd "$workdir"
+  npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+)
 node "${workdir}/dist/cli/main.js" install
