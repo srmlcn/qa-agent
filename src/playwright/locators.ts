@@ -1,4 +1,4 @@
-import type { Locator, Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 import { QaError } from "../errors/qa-error.js";
 import { locatorCandidates, rankCandidates } from "../flows/rank.js";
 import type { Locator as FlowLocator } from "../flows/schema.js";
@@ -171,6 +171,35 @@ export async function resolveTrajectoryLocators(
     actions.push(await resolveActionLocator(page, action));
   }
   return { ...trajectory, actions };
+}
+
+/**
+ * Checks locators on the page discovery actually drove.
+ * The Playwright page Stagehand did not navigate stays on `about:blank`.
+ * In that case the Stagehand browser is attached through its CDP websocket.
+ */
+export async function resolveDiscoveryLocators(
+  localPage: Page,
+  trajectory: DiscoveryTrajectory,
+  connectUrl: string | undefined,
+): Promise<DiscoveryTrajectory> {
+  if (localPage.url() !== "about:blank") {
+    return resolveTrajectoryLocators(localPage, trajectory);
+  }
+  if (connectUrl === undefined) {
+    return trajectory;
+  }
+  const connected = await chromium.connectOverCDP(connectUrl);
+  try {
+    const pages = connected.contexts().flatMap((context) => context.pages());
+    const active = [...pages].reverse().find((page) => page.url() !== "about:blank");
+    if (active === undefined) {
+      return trajectory;
+    }
+    return await resolveTrajectoryLocators(active, trajectory);
+  } finally {
+    await connected.close().catch(() => undefined);
+  }
 }
 
 async function resolveActionLocator(

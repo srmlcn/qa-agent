@@ -1,9 +1,16 @@
+import { createServer as createHttpServer } from "node:http";
+import { createServer } from "node:net";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { chromium, type Browser } from "playwright";
 import { QaError } from "../../../src/errors/qa-error.js";
 import { compile } from "../../../src/flows/compiler.js";
 import type { DiscoveryAction } from "../../../src/stagehand/trajectory.js";
 import { runAction } from "../../../src/playwright/actions.js";
-import { resolveTrajectoryLocators, toLocator } from "../../../src/playwright/locators.js";
+import {
+  resolveDiscoveryLocators,
+  resolveTrajectoryLocators,
+  toLocator,
+} from "../../../src/playwright/locators.js";
 import {
   startBrowser,
   type BrowserSession,
@@ -125,6 +132,54 @@ test("duplicate exact text is saved as the unique intended row", async () => {
   expect(await clickedId()).toBe("choice-change");
 });
 
+test("a blank Playwright page resolves locators on the Stagehand browser", async () => {
+  const port = await reservePort();
+  let remote: Browser | undefined;
+  const blankContext = await session.browser.newContext();
+  const blank = await blankContext.newPage();
+  try {
+    remote = await chromium.launch({
+      headless: true,
+      args: [
+        `--remote-debugging-port=${port}`,
+        "--remote-debugging-address=127.0.0.1",
+      ],
+    });
+    const page = await remote.newPage();
+    const served = await serveHtml(hiddenSelectHtml);
+    try {
+      await page.goto(served.url);
+    const version = await fetch(`http://127.0.0.1:${port}/json/version`);
+    const body = (await version.json()) as { webSocketDebuggerUrl?: string };
+    const connectUrl = body.webSocketDebuggerUrl;
+    if (connectUrl === undefined) {
+      throw new Error("expected a websocket debugger URL");
+    }
+
+    const resolved = await resolveDiscoveryLocators(
+      blank,
+      trajectory([
+        clickAction({ selector: "//input[@id='focusser']" }),
+      ]),
+      connectUrl,
+    );
+    const flow = compile(resolved, compileOptions);
+    const step = flow.steps[0];
+    if (step?.action !== "click") {
+      throw new Error("expected a click");
+    }
+    expect(await toLocator(page, step.locator).evaluate((element) => element.id)).toBe(
+      "visible-placeholder",
+    );
+    } finally {
+      await served.close();
+    }
+  } finally {
+    await blankContext.close();
+    await remote?.close();
+  }
+});
+
 test("an irrecoverable duplicate text locator fails compilation", async () => {
   await show(duplicateTextHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([
@@ -167,6 +222,59 @@ function clickAction(input: {
     urlAfter: "about:blank",
     arguments: input.arguments ?? {},
   };
+}
+
+function serveHtml(html: string): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = createHttpServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end(html);
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("Could not bind the fixture page."));
+        return;
+      }
+      resolve({
+        url: `http://127.0.0.1:${address.port}/`,
+        close: () =>
+          new Promise((done, fail) => {
+            server.close((error) => {
+              if (error) {
+                fail(error);
+                return;
+              }
+              done();
+            });
+          }),
+      });
+    });
+  });
+}
+
+function reservePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("Could not reserve a loopback port."));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
 }
 
 async function show(html: string): Promise<void> {

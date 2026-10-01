@@ -3,7 +3,7 @@ import { QaError } from "../errors/qa-error.js";
 import { assertUrlAllowed } from "../security/hosts.js";
 import { assertStepsRemaining } from "../security/policy.js";
 import type { Page } from "playwright";
-import { resolveTrajectoryLocators } from "../playwright/locators.js";
+import { resolveDiscoveryLocators } from "../playwright/locators.js";
 import { startBrowser, type BrowserSession } from "../playwright/runtime.js";
 import type { DiscoveryClient } from "./fake-client.js";
 import { createStagehand, requireApiKey } from "./llm-client.js";
@@ -107,8 +107,8 @@ export async function discover(
       throw cancelled();
     }
     trajectory = acceptResult(outcome.result, options.maxSteps, startedAt);
-    if (outcome.page !== undefined) {
-      trajectory = await resolveTrajectoryLocators(outcome.page, trajectory);
+    if (outcome.resolveLocators !== undefined) {
+      trajectory = await outcome.resolveLocators(trajectory);
     }
   } catch (error: unknown) {
     caught = true;
@@ -146,7 +146,9 @@ async function closeAfter(
 
 type StagehandRun = {
   result: AgentResultLike;
-  page?: Page;
+  resolveLocators?: (
+    trajectory: DiscoveryTrajectory,
+  ) => Promise<DiscoveryTrajectory>;
 };
 
 async function runStagehand(
@@ -204,8 +206,28 @@ async function runStagehand(
       actions: executed.actions,
       completed: executed.completed,
     },
-    page: discoveryPage(browserSession),
+    resolveLocators: (trajectory) =>
+      resolveDiscoveryLocators(
+        discoveryPage(browserSession),
+        trajectory,
+        connectUrl(stagehand),
+      ),
   };
+}
+
+function connectUrl(stagehand: { connectURL?: () => string }): string | undefined {
+  if (typeof stagehand.connectURL !== "function") {
+    return undefined;
+  }
+  try {
+    const url = stagehand.connectURL();
+    if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+      return undefined;
+    }
+    return url;
+  } catch {
+    return undefined;
+  }
 }
 
 function discoveryPage(session: BrowserSession): Page {
