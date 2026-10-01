@@ -415,6 +415,55 @@ test("a successful v3 tool-call run keeps a non-empty trajectory", () => {
   expect(trajectory.note).toBe("Opened the invoice.");
 });
 
+test("a verifier toolOutput keeps playwright arguments", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          actionName: "act",
+          actionArgs: { description: "click save" },
+          toolOutput: {
+            playwrightArguments: {
+              selector: "#save",
+              method: "click",
+              description: "click save",
+            },
+          },
+          urlBefore: "https://app.example/form",
+        },
+        {
+          actionName: "fillForm",
+          actionArgs: {},
+          toolOutput: {
+            playwrightArguments: [
+              {
+                selector: "#email",
+                method: "fill",
+                arguments: ["ada@example.com"],
+              },
+            ],
+          },
+          urlBefore: "https://app.example/form",
+          urlAfter: "https://app.example/form",
+        },
+      ],
+    },
+    meta,
+  );
+
+  expect(trajectory.actions.map((action) => action.method)).toEqual([
+    "click",
+    "fill",
+  ]);
+  expect(trajectory.actions[0]?.selector).toBe("#save");
+  expect(trajectory.actions[1]).toMatchObject({
+    selector: "#email",
+    urlBefore: "https://app.example/form",
+    arguments: ["ada@example.com"],
+  });
+});
+
 test("fillForm actions keep the envelope page URLs", () => {
   const trajectory = fromAgentResult(
     {

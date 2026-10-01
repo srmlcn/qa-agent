@@ -308,7 +308,7 @@ function unwrapToolEnvelope(
 }
 
 function toolPayload(record: Record<string, unknown>): Record<string, unknown> {
-  const direct = firstRecord(record.output, record.result);
+  const direct = firstRecord(record.output, record.result, record.toolOutput);
   if (direct === undefined) {
     return {};
   }
