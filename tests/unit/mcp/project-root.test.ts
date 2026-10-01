@@ -49,10 +49,10 @@ test("a missing listRoots function is unsupported", async () => {
   );
 });
 
-test("a listRoots failure is unsupported", async () => {
+test("a missing roots capability is unsupported", async () => {
   const client = {
     listRoots: async (): Promise<{ roots: [] }> => {
-      throw new Error("Client does not support listing roots (required for roots/list)");
+      throw new Error("Client does not support roots capability (required for roots/list)");
     },
   };
   setRootLister(rootListerFromClient(client));
@@ -64,6 +64,22 @@ test("a listRoots failure is unsupported", async () => {
   expect(error.message).toContain("does not support workspace-root discovery");
   expect(error.message).toContain("projectRoot is required");
   expect(error.message).not.toMatch(/working directory|\bcwd\b/i);
+});
+
+test("a listRoots transport failure does not accept an explicit path", async () => {
+  const client = {
+    listRoots: async (): Promise<{ roots: [] }> => {
+      throw new Error("Connection closed");
+    },
+  };
+  setRootLister(rootListerFromClient(client));
+  const root = createDir("qa-root-transport-");
+
+  const explicit = await rejectedRoot(root);
+  expect(explicit.message).toBe("Workspace root discovery failed");
+  expect(explicit.message).not.toContain(root);
+  const omitted = await rejectedRoot(undefined);
+  expect(omitted.message).toBe("Workspace root discovery failed");
 });
 
 test("a successful empty roots list rejects an omitted projectRoot", async () => {

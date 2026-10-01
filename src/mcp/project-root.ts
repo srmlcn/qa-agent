@@ -46,9 +46,13 @@ export function rootListerFromClient(client: RootsClient): RootLister {
         }
       }
       return { supported: true, roots: paths };
-    } catch {
-      // The SDK throws when the client did not advertise capabilities.roots.
-      return { supported: false };
+    } catch (error) {
+      // The SDK rejects roots/list before the client when capabilities.roots
+      // is absent. Any other failure is not proof that roots are unsupported.
+      if (isMissingRootsCapability(error)) {
+        return { supported: false };
+      }
+      throw blocked("Workspace root discovery failed");
     }
   };
 }
@@ -157,6 +161,13 @@ function pathFromRootUri(uri: string | undefined): string | undefined {
     return fileURLToPath(uri);
   }
   return resolve(uri);
+}
+
+function isMissingRootsCapability(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("does not support roots capability")
+  );
 }
 
 function blocked(message: string): QaError {
