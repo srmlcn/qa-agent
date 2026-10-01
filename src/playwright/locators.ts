@@ -348,7 +348,13 @@ function documentKey(value: string): string | undefined {
   ) {
     return undefined;
   }
-  url.hash = "";
+  // A non-empty fragment is the route for a hash-based SPA. Dropping it
+  // makes `#/invoices` and `#/invoices/1/edit` the same document. A bare
+  // `#` is not a route; `URL.hash` is empty in that case, and clearing it
+  // removes the marker from `href`.
+  if (url.hash.length === 0) {
+    url.hash = "";
+  }
   return url.href;
 }
 
