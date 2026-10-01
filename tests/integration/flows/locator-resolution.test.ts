@@ -159,7 +159,10 @@ test("a blank Playwright page resolves locators on the Stagehand browser", async
     const resolved = await resolveDiscoveryLocators(
       blank,
       trajectory([
-        clickAction({ selector: "//input[@id='focusser']" }),
+        clickAction({
+          selector: "//input[@id='focusser']",
+          urlBefore: served.url,
+        }),
       ]),
       connectUrl,
     );
@@ -204,6 +207,24 @@ test("a locator recorded on another page is not verified against this page", asy
     expect(await toLocator(session.page, verified).evaluate((element) => element.id)).toBe(
       "visible-placeholder",
     );
+  } finally {
+    await served.close();
+  }
+});
+
+test("a locator without a recorded page is not verified against the final page", async () => {
+  const served = await serveHtml(hiddenSelectHtml);
+  try {
+    await session.page.goto(served.url);
+    const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+      {
+        ...clickAction({ selector: "#visible-placeholder" }),
+        urlBefore: "",
+        urlAfter: served.url,
+      },
+    ]));
+
+    expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
   } finally {
     await served.close();
   }
@@ -340,6 +361,7 @@ function reservePort(): Promise<number> {
 }
 
 async function show(html: string): Promise<void> {
+  await session.page.goto("about:blank");
   await session.page.setContent(html);
   await session.page.evaluate(() => {
     document.getElementById("visible-placeholder")?.addEventListener("click", () => {

@@ -279,15 +279,9 @@ async function resolveActionLocator(
  * stays in place and replay checks it on the page that action navigates to.
  */
 function recordedOnThisPage(page: Page, action: DiscoveryAction): boolean {
-  const recorded = documentKey(action.urlBefore) ?? documentKey(action.urlAfter);
-  if (recorded === undefined) {
-    return true;
-  }
+  const recorded = documentKey(action.urlBefore);
   const current = documentKey(page.url());
-  if (current === undefined) {
-    return true;
-  }
-  return recorded === current;
+  return recorded !== undefined && current !== undefined && recorded === current;
 }
 
 function documentKey(value: string): string | undefined {
@@ -297,7 +291,10 @@ function documentKey(value: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") &&
+    !(url.protocol === "about:" && url.pathname === "blank")
+  ) {
     return undefined;
   }
   url.hash = "";
