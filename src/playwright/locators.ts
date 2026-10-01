@@ -310,6 +310,14 @@ function documentEpochs(actions: readonly DiscoveryAction[]): {
       epoch += 1;
     }
     epochs.push(epoch);
+    if (isDocumentBoundary(action)) {
+      epoch += 1;
+      const landed = documentKey(action.urlAfter) ?? before;
+      if (landed !== undefined) {
+        documentUrl = landed;
+      }
+      continue;
+    }
     const after = documentKey(action.urlAfter);
     if (before !== undefined && after !== undefined && after !== before) {
       epoch += 1;
@@ -326,6 +334,11 @@ function documentEpochs(actions: readonly DiscoveryAction[]): {
  * a different element, so it is not saved as verified. The recorded locator
  * stays in place and replay checks it on the page that action navigates to.
  */
+function isDocumentBoundary(action: DiscoveryAction): boolean {
+  const token = (action.method ?? action.kind).trim().toLowerCase();
+  return token === "goto" || token === "reload";
+}
+
 function recordedOnThisPage(page: Page, action: DiscoveryAction): boolean {
   const recorded = documentKey(action.urlBefore);
   const current = documentKey(page.url());

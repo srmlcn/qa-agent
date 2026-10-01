@@ -309,6 +309,36 @@ const duplicatePlaceholderHtml = `<!DOCTYPE html>
   </body>
 </html>`;
 
+test("a reload starts a new document at the same URL", async () => {
+  const served = await serveHtml(hiddenSelectHtml);
+  try {
+    await session.page.goto(served.url);
+    const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: served.url,
+      }),
+      {
+        index: 1,
+        kind: "reload",
+        method: "reload",
+        urlBefore: served.url,
+        urlAfter: served.url,
+        arguments: {},
+      },
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: served.url,
+      }),
+    ]));
+
+    expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[2]?.resolvedLocator).toBeDefined();
+  } finally {
+    await served.close();
+  }
+});
+
 test("a hidden focusser without a unique surface fails compilation", async () => {
   await show(duplicatePlaceholderHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([
