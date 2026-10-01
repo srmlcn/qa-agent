@@ -166,9 +166,16 @@ export async function resolveTrajectoryLocators(
   page: Page,
   trajectory: DiscoveryTrajectory,
 ): Promise<DiscoveryTrajectory> {
+  const epochs = documentEpochs(trajectory.actions);
   const actions: DiscoveryAction[] = [];
-  for (const action of trajectory.actions) {
-    actions.push(await resolveActionLocator(page, action));
+  for (let index = 0; index < trajectory.actions.length; index += 1) {
+    const action = trajectory.actions[index];
+    if (action === undefined) {
+      continue;
+    }
+    actions.push(
+      await resolveActionLocator(page, action, epochs.epochs[index] === epochs.live),
+    );
   }
   return { ...trajectory, actions };
 }
@@ -219,6 +226,7 @@ function unchecked(trajectory: DiscoveryTrajectory): DiscoveryTrajectory {
 async function resolveActionLocator(
   page: Page,
   action: DiscoveryAction,
+  onLiveDocument: boolean,
 ): Promise<DiscoveryAction> {
   if (!needsLocatorCheck(action)) {
     return action;
@@ -227,7 +235,7 @@ async function resolveActionLocator(
   if (candidates.length === 0) {
     return action;
   }
-  if (!recordedOnThisPage(page, action)) {
+  if (!onLiveDocument || !recordedOnThisPage(page, action)) {
     return action;
   }
   const probes: Probe[] = [];
@@ -271,6 +279,39 @@ async function resolveActionLocator(
     throw ambiguousLocator(action, sample);
   }
   return action;
+}
+
+/**
+ * A navigation starts a new document, including a return to a URL already seen.
+ * Only the document still loaded is checked. An earlier visit to that URL is
+ * left unverified so its selector is not saved against the new document.
+ */
+function documentEpochs(actions: readonly DiscoveryAction[]): {
+  epochs: number[];
+  live: number;
+} {
+  let epoch = 0;
+  let documentUrl: string | undefined;
+  const epochs: number[] = [];
+  for (const action of actions) {
+    const before = documentKey(action.urlBefore);
+    if (
+      before !== undefined &&
+      documentUrl !== undefined &&
+      before !== documentUrl
+    ) {
+      epoch += 1;
+    }
+    epochs.push(epoch);
+    const after = documentKey(action.urlAfter);
+    if (before !== undefined && after !== undefined && after !== before) {
+      epoch += 1;
+      documentUrl = after;
+    } else if (before !== undefined) {
+      documentUrl = before;
+    }
+  }
+  return { epochs, live: epoch };
 }
 
 /**

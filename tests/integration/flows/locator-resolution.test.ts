@@ -212,6 +212,39 @@ test("a locator recorded on another page is not verified against this page", asy
   }
 });
 
+test("a return to the same URL is not the earlier document", async () => {
+  const served = await serveHtml(hiddenSelectHtml);
+  try {
+    await session.page.goto(served.url);
+    const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+      {
+        ...clickAction({
+          selector: "#visible-placeholder",
+          urlBefore: served.url,
+        }),
+        urlAfter: "https://other.example/step",
+      },
+      {
+        ...clickAction({
+          selector: "#visible-placeholder",
+          urlBefore: "https://other.example/step",
+        }),
+        urlAfter: served.url,
+      },
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: served.url,
+      }),
+    ]));
+
+    expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[1]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[2]?.resolvedLocator).toBeDefined();
+  } finally {
+    await served.close();
+  }
+});
+
 test("a locator without a recorded page is not verified against the final page", async () => {
   const served = await serveHtml(hiddenSelectHtml);
   try {
