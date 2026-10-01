@@ -504,6 +504,11 @@ export function fromAgentResult(
         continue;
       }
       if (!isConcrete(record)) {
+        const name =
+          text(record.type) ?? text(record.toolName) ?? text(record.actionName);
+        if (name !== undefined) {
+          skipped.push(name);
+        }
         continue;
       }
       const repeats = keyboardRepeats(record);

@@ -533,6 +533,30 @@ test("unsupported v3 tools fail instead of an empty trajectory", () => {
   expect(error.message).not.toContain("Discovery stopped after 0 actions");
 });
 
+test("an unrecognized tool fails instead of an empty trajectory", () => {
+  let error: unknown;
+  try {
+    fromAgentResult(
+      {
+        success: true,
+        completed: true,
+        actions: [{ type: "widget", payload: { id: "menu" } }],
+      },
+      meta,
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  expect(error).toBeInstanceOf(QaError);
+  if (!(error instanceof QaError)) {
+    throw new Error("expected DISCOVERY_FAILED");
+  }
+  expect(error.code).toBe("DISCOVERY_FAILED");
+  expect(error.message).toContain("widget");
+  expect(error.message).not.toContain("Discovery stopped after 0 actions");
+});
+
 test("a message alone does not become an action", () => {
   const trajectory = fromAgentResult(
     {
