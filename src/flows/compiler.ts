@@ -103,7 +103,7 @@ function compileAction(
     semanticFallback,
   };
 
-  return toStep(flowAction, identity, locator, value, flowId, action.index);
+  return toStep(flowAction, identity, locator, value, flowId, action);
 }
 
 function toStep(
@@ -112,8 +112,9 @@ function toStep(
   locator: Locator | undefined,
   value: string | undefined,
   flowId: string,
-  index: number,
+  action: DiscoveryAction,
 ): Step {
+  const index = action.index;
   switch (flowAction) {
     case "click":
     case "check":
@@ -124,7 +125,33 @@ function toStep(
         requiredLocator(locator, flowId, identity.id, index),
       );
     case "fill":
+      if (locator === undefined && isFocusedType(action)) {
+        return seal({
+          ...identity,
+          action: "fill",
+          value: requiredValue(value, flowAction, flowId, identity.id, index),
+        });
+      }
+      return valuedStep(
+        "fill",
+        identity,
+        requiredLocator(locator, flowId, identity.id, index),
+        requiredValue(value, flowAction, flowId, identity.id, index),
+      );
     case "press":
+      if (locator === undefined) {
+        return seal({
+          ...identity,
+          action: "press",
+          value: requiredValue(value, flowAction, flowId, identity.id, index),
+        });
+      }
+      return valuedStep(
+        "press",
+        identity,
+        requiredLocator(locator, flowId, identity.id, index),
+        requiredValue(value, flowAction, flowId, identity.id, index),
+      );
     case "select":
       return valuedStep(
         flowAction,
@@ -283,10 +310,19 @@ function targetLabel(
   if (locator !== undefined) {
     return locatorTarget(locator);
   }
-  if (flowAction === "waitFor" && value !== undefined) {
+  if (
+    (flowAction === "press" || flowAction === "fill" || flowAction === "waitFor") &&
+    value !== undefined
+  ) {
     return value;
   }
   return "";
+}
+
+/** Stagehand `keys` types into the focused element and does not record a locator. */
+function isFocusedType(action: DiscoveryAction): boolean {
+  const method = action.method?.trim().toLowerCase();
+  return method === "type" || action.kind.trim().toLowerCase() === "keys";
 }
 
 function locatorTarget(locator: Locator): string {
