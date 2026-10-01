@@ -1,3 +1,11 @@
+## [1.1.5](https://github.com/srmlcn/qa-agent/compare/v1.1.4...v1.1.5) (2026-10-01)
+
+
+### Bug Fixes
+
+* **orchestrator:** accept successful discovery ([9eaa58f](https://github.com/srmlcn/qa-agent/commit/9eaa58f822ac1812f960add013efcc740a29574e))
+* **playwright:** keep locators that have left ([f4b030f](https://github.com/srmlcn/qa-agent/commit/f4b030f0ef616c604d0adb672c906e8c2c6b4c72))
+
 ## [1.1.4](https://github.com/srmlcn/qa-agent/compare/v1.1.3...v1.1.4) (2026-10-01)
 
 
