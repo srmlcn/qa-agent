@@ -1,3 +1,12 @@
+## [1.1.2](https://github.com/srmlcn/qa-agent/compare/v1.1.1...v1.1.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **config:** raise default playwright timeout ([6cc8553](https://github.com/srmlcn/qa-agent/commit/6cc8553826bea21c94e6f0940dc6c13bf96fe477))
+* **mcp:** allow projectRoot when roots are unsupported ([1cca186](https://github.com/srmlcn/qa-agent/commit/1cca186cda7fb67bddde1f20a82520f8d53767a9))
+* **mcp:** reject failed root discovery ([dd25f51](https://github.com/srmlcn/qa-agent/commit/dd25f51ce7ff0938f18f06558ca8f00e22e043f0))
+
 ## [1.1.1](https://github.com/srmlcn/qa-agent/compare/v1.1.0...v1.1.1) (2026-09-30)
 
 
