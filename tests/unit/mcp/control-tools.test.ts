@@ -79,6 +79,7 @@ test("qa.repair_flow maps a product failure to the original run id", async () =>
       runId: "run-1",
       cookies: "secret-cookie",
       client: { act: true },
+      projectRoot,
     }),
   );
 
@@ -133,6 +134,7 @@ test("qa.repair_flow maps a replay failure to the original run id", async () => 
       flowId: "project.archive",
       failedStepId: "confirm-archive",
       runId: "run-1",
+      projectRoot,
     }),
   );
 
@@ -168,6 +170,7 @@ test("qa.repair_flow returns the flow when repair succeeds", async () => {
       flowId: "project.archive",
       failedStepId: "confirm-archive",
       runId: "run-1",
+      projectRoot,
     }),
   );
 
@@ -183,6 +186,7 @@ test("omitting runId or failedStepId throws and does not call repairFlow", async
       repairFlowTool.handler({
         flowId: "project.archive",
         failedStepId: "confirm-archive",
+        projectRoot,
       }),
     ).rejects.toEqual(
       expect.objectContaining({
@@ -195,6 +199,7 @@ test("omitting runId or failedStepId throws and does not call repairFlow", async
       repairFlowTool.handler({
         flowId: "project.archive",
         runId: "run-1",
+        projectRoot,
       }),
     ).rejects.toBeInstanceOf(QaError);
   });
@@ -225,6 +230,7 @@ test("qa.capture_auth returns the profile and does not return cookies", async ()
       profile: "owner",
       startUrl: "http://localhost:3000/login",
       cookies: [{ name: "session", value: "secret-cookie" }],
+      projectRoot,
     }),
   );
 
