@@ -373,6 +373,8 @@ function fillFormActs(
       taskCompleted: false,
       playwrightArguments: item,
       ...(record.pageUrl !== undefined ? { pageUrl: record.pageUrl } : {}),
+      ...(record.urlBefore !== undefined ? { urlBefore: record.urlBefore } : {}),
+      ...(record.urlAfter !== undefined ? { urlAfter: record.urlAfter } : {}),
     });
   }
   return acts;

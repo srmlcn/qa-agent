@@ -415,6 +415,47 @@ test("a successful v3 tool-call run keeps a non-empty trajectory", () => {
   expect(trajectory.note).toBe("Opened the invoice.");
 });
 
+test("fillForm actions keep the envelope page URLs", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "tool-result",
+          toolName: "fillForm",
+          urlBefore: "https://app.example/form",
+          urlAfter: "https://app.example/form",
+          output: {
+            playwrightArguments: [
+              {
+                selector: "#email",
+                method: "fill",
+                arguments: ["ada@example.com"],
+              },
+              {
+                selector: "#name",
+                method: "fill",
+                arguments: ["Ada"],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    meta,
+  );
+
+  expect(trajectory.actions).toHaveLength(2);
+  expect(trajectory.actions.map((action) => action.urlBefore)).toEqual([
+    "https://app.example/form",
+    "https://app.example/form",
+  ]);
+  expect(trajectory.actions.map((action) => action.urlAfter)).toEqual([
+    "https://app.example/form",
+    "https://app.example/form",
+  ]);
+});
+
 test("mapped v3 goto, keys, and wait stay in the trajectory and scroll is named", () => {
   const [keys] = mapToolResultToActions({
     toolCallName: "keys",
