@@ -530,6 +530,14 @@ export function fromAgentResult(
     if (!entry) {
       continue;
     }
+    const namedTool = text(entry.toolName) ?? text(entry.actionName);
+    if (
+      namedTool !== undefined &&
+      !V3_TOOL_NAMES.has(namedTool.toLowerCase())
+    ) {
+      skipped.push(namedTool);
+      continue;
+    }
     const normalized = normalizeV3Record(entry);
     if (isDoneRecord(normalized)) {
       continue;
