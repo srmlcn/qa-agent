@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { QaError } from "../../../src/errors/qa-error.js";
 import { compile } from "../../../src/flows/compiler.js";
 import type { DiscoveryAction } from "../../../src/stagehand/trajectory.js";
 import { runAction } from "../../../src/playwright/actions.js";
@@ -75,6 +76,67 @@ test("a hidden ui-select focusser is retargeted to the visible placeholder", asy
   await runAction(session.page, step, ACTION_TIMEOUT_MS);
   expect(Date.now() - started).toBeLessThan(1_500);
   expect(await clickedId()).toBe("visible-placeholder");
+});
+
+const duplicateTextHtml = `<!DOCTYPE html>
+<html>
+  <body>
+    <div id="registered-agent" class="ui-select-container">
+      <ul class="ui-select-choices">
+        <li id="choice-change" class="ui-select-choices-row">Change registered agent</li>
+      </ul>
+    </div>
+    <div id="mailing-agent" class="ui-select-container">
+      <ul class="ui-select-choices">
+        <li id="choice-mail" class="ui-select-choices-row">Change registered agent</li>
+      </ul>
+    </div>
+  </body>
+</html>`;
+
+test("duplicate exact text is saved as the unique intended row", async () => {
+  await show(duplicateTextHtml);
+  await session.page.evaluate(() => {
+    for (const id of ["choice-change", "choice-mail"]) {
+      document.getElementById(id)?.addEventListener("click", () => {
+        document.body.dataset.clicked = id;
+      });
+    }
+  });
+  const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({
+      selector: "text=Change registered agent",
+      arguments: {
+        selector: "//div[@id='registered-agent']//li[@id='choice-change']",
+      },
+    }),
+  ]));
+  const flow = compile(resolved, compileOptions);
+  const step = flow.steps[0];
+  if (step?.action !== "click") {
+    throw new Error("expected a click");
+  }
+
+  const matches = await toLocator(session.page, step.locator).evaluateAll((elements) =>
+    elements.map((element) => element.id),
+  );
+  expect(matches).toEqual(["choice-change"]);
+  await runAction(session.page, step, ACTION_TIMEOUT_MS);
+  expect(await clickedId()).toBe("choice-change");
+});
+
+test("an irrecoverable duplicate text locator fails compilation", async () => {
+  await show(duplicateTextHtml);
+  const pending = resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({ selector: "text=Change registered agent" }),
+  ]));
+
+  await expect(pending).rejects.toBeInstanceOf(QaError);
+  await expect(pending).rejects.toMatchObject({
+    code: "FLOW_COMPILE_FAILED",
+  });
+  await expect(pending).rejects.toThrow(/matched multiple elements/);
+  await expect(pending).rejects.toThrow(/Change registered agent/);
 });
 
 const compileOptions = {

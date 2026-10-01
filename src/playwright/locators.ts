@@ -159,9 +159,8 @@ type SurfaceDescription = {
 /**
  * Checks interaction locators on `page` before they are compiled.
  * A hidden field is not kept when a visible control for the same widget
- * is on the page. `nth` is not used: position changes when rows are
- * reordered, so a locator that still matches multiple elements is left
- * unresolved here.
+ * is on the page. `nth` is not used: row order is not a stable identity.
+ * A locator that still matches multiple elements fails compilation.
  */
 export async function resolveTrajectoryLocators(
   page: Page,
@@ -212,7 +211,46 @@ async function resolveActionLocator(
       return withResolved(action, surface);
     }
   }
+
+  const bestUnique = orderByPreference(unique)[0];
+  if (bestUnique !== undefined) {
+    return withResolved(action, bestUnique);
+  }
+
+  const ambiguous = probes.filter((probe) => probe.count > 1);
+  const sample = orderByPreference(ambiguous.map((probe) => probe.locator))[0];
+  if (sample !== undefined) {
+    throw ambiguousLocator(action, sample);
+  }
   return action;
+}
+
+function ambiguousLocator(action: DiscoveryAction, locator: FlowLocator): QaError {
+  return new QaError({
+    code: "FLOW_COMPILE_FAILED",
+    message: `Action at index ${action.index}: ${locatorLabel(locator)} matched multiple elements.`,
+  });
+}
+
+function locatorLabel(locator: FlowLocator): string {
+  switch (locator.type) {
+    case "role":
+      return `role locator "${locator.role}" "${locator.name}"`;
+    case "label":
+      return `label locator "${locator.name}"`;
+    case "placeholder":
+      return `placeholder locator "${locator.value}"`;
+    case "text":
+      return `text locator "${locator.text}"`;
+    case "testid":
+      return `testid locator "${locator.name}"`;
+    case "attr":
+      return `attribute locator "${locator.name}"="${locator.value}"`;
+    case "css":
+      return `css locator "${locator.selector}"`;
+    case "xpath":
+      return `xpath locator "${locator.selector}"`;
+  }
 }
 
 function needsLocatorCheck(action: DiscoveryAction): boolean {
