@@ -340,3 +340,20 @@ test("chooseLocator returns undefined when the action has no locator", () => {
     ),
   ).toBeUndefined();
 });
+
+test("a page-resolved locator wins over a higher-ranked recorded hint", () => {
+  const action = discovered({
+    method: "click",
+    selector: "//input[@id='focusser']",
+    arguments: { placeholder: "Select an action" },
+  });
+  action.resolvedLocator = {
+    type: "css",
+    selector: "#visible-placeholder",
+  };
+
+  expect(chooseLocator(action)).toEqual({
+    type: "css",
+    selector: "#visible-placeholder",
+  });
+});

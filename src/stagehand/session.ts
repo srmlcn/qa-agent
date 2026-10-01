@@ -2,7 +2,9 @@ import type { ProjectConfig } from "../config/schema.js";
 import { QaError } from "../errors/qa-error.js";
 import { assertUrlAllowed } from "../security/hosts.js";
 import { assertStepsRemaining } from "../security/policy.js";
-import { startBrowser } from "../playwright/runtime.js";
+import type { Page } from "playwright";
+import { resolveTrajectoryLocators } from "../playwright/locators.js";
+import { startBrowser, type BrowserSession } from "../playwright/runtime.js";
 import type { DiscoveryClient } from "./fake-client.js";
 import { createStagehand, requireApiKey } from "./llm-client.js";
 import type { LlmProvider } from "./provider.js";
@@ -99,12 +101,15 @@ export async function discover(
     const work =
       options.client === undefined
         ? runStagehand(options, resources)
-        : options.client.run(options.objective);
-    const result = await abortable(work, signal);
+        : options.client.run(options.objective).then((result) => ({ result }));
+    const outcome = await abortable(work, signal);
     if (signal?.aborted) {
       throw cancelled();
     }
-    trajectory = acceptResult(result, options.maxSteps, startedAt);
+    trajectory = acceptResult(outcome.result, options.maxSteps, startedAt);
+    if (outcome.page !== undefined) {
+      trajectory = await resolveTrajectoryLocators(outcome.page, trajectory);
+    }
   } catch (error: unknown) {
     caught = true;
     primaryError = error;
@@ -139,10 +144,15 @@ async function closeAfter(
   }
 }
 
+type StagehandRun = {
+  result: AgentResultLike;
+  page?: Page;
+};
+
 async function runStagehand(
   options: DiscoverOptions,
   resources: SessionResources,
-): Promise<AgentResultLike> {
+): Promise<StagehandRun> {
   const signal = options.signal;
   if (signal?.aborted) {
     throw cancelled();
@@ -188,11 +198,27 @@ async function runStagehand(
     ...(signal === undefined ? {} : { signal }),
   });
   return {
-    success: executed.success,
-    message: executed.message,
-    actions: executed.actions,
-    completed: executed.completed,
+    result: {
+      success: executed.success,
+      message: executed.message,
+      actions: executed.actions,
+      completed: executed.completed,
+    },
+    page: discoveryPage(browserSession),
   };
+}
+
+function discoveryPage(session: BrowserSession): Page {
+  const pages = session.browser
+    .contexts()
+    .flatMap((context) => context.pages());
+  for (let index = pages.length - 1; index >= 0; index -= 1) {
+    const candidate = pages[index];
+    if (candidate !== undefined && candidate.url() !== "about:blank") {
+      return candidate;
+    }
+  }
+  return session.page;
 }
 
 async function openStartUrl(

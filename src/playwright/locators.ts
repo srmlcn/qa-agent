@@ -1,12 +1,18 @@
 import type { Locator, Page } from "playwright";
 import { QaError } from "../errors/qa-error.js";
+import { locatorCandidates, rankCandidates } from "../flows/rank.js";
 import type { Locator as FlowLocator } from "../flows/schema.js";
+import type {
+  DiscoveryAction,
+  DiscoveryTrajectory,
+} from "../stagehand/trajectory.js";
 
 type AriaRole = Parameters<Page["getByRole"]>[0];
 
 /**
  * Turns a stored FlowSpec locator into a Playwright locator.
- * The flow already chose the locator. This module does not rank candidates.
+ * Ranking stays in the flow ranker. `resolveTrajectoryLocators` checks a
+ * live page before a candidate is stored.
  */
 export function toLocator(page: Page, locator: FlowLocator): Locator {
   switch (locator.type) {
@@ -134,4 +140,318 @@ function unsupportedLocator(locator: never): never {
     code: "FLOW_VALIDATION_FAILED",
     message: `Unsupported locator type "${String(type)}".`,
   });
+}
+
+type Probe = {
+  locator: FlowLocator;
+  count: number;
+  interactable: boolean;
+};
+
+type SurfaceDescription = {
+  css?: string;
+  testId?: string;
+  role?: string;
+  name?: string;
+  text?: string;
+};
+
+/**
+ * Checks interaction locators on `page` before they are compiled.
+ * A hidden field is not kept when a visible control for the same widget
+ * is on the page. `nth` is not used: position changes when rows are
+ * reordered, so a locator that still matches multiple elements is left
+ * unresolved here.
+ */
+export async function resolveTrajectoryLocators(
+  page: Page,
+  trajectory: DiscoveryTrajectory,
+): Promise<DiscoveryTrajectory> {
+  const actions: DiscoveryAction[] = [];
+  for (const action of trajectory.actions) {
+    actions.push(await resolveActionLocator(page, action));
+  }
+  return { ...trajectory, actions };
+}
+
+async function resolveActionLocator(
+  page: Page,
+  action: DiscoveryAction,
+): Promise<DiscoveryAction> {
+  if (!needsLocatorCheck(action)) {
+    return action;
+  }
+  const candidates = locatorCandidates(action);
+  if (candidates.length === 0) {
+    return action;
+  }
+  const probes: Probe[] = [];
+  for (const candidate of candidates) {
+    probes.push(await probeLocator(page, candidate));
+  }
+  if (probes.every((probe) => probe.count === 0)) {
+    return action;
+  }
+
+  const interactable = probes
+    .filter((probe) => probe.count === 1 && probe.interactable)
+    .map((probe) => probe.locator);
+  if (interactable.length > 0) {
+    return withResolved(action, rankCandidates(interactable));
+  }
+
+  const unique = probes
+    .filter((probe) => probe.count === 1)
+    .map((probe) => probe.locator);
+  for (const locator of orderByPreference(unique)) {
+    if (!(await isFormField(page, locator))) {
+      continue;
+    }
+    const surface = await visibleSurface(page, locator);
+    if (surface !== undefined) {
+      return withResolved(action, surface);
+    }
+  }
+  return action;
+}
+
+function needsLocatorCheck(action: DiscoveryAction): boolean {
+  const token = (action.method ?? action.kind).trim().toLowerCase();
+  if (
+    token === "goto" ||
+    token === "reload" ||
+    token === "wait" ||
+    token === "waitfor"
+  ) {
+    return false;
+  }
+  const kind = action.kind.trim().toLowerCase();
+  if (
+    (token === "press" || token === "type" || kind === "keys") &&
+    locatorCandidates(action).length === 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function probeLocator(page: Page, locator: FlowLocator): Promise<Probe> {
+  try {
+    const target = toLocator(page, locator);
+    const count = await target.count();
+    if (count !== 1) {
+      return { locator, count, interactable: false };
+    }
+    const interactable = await target.evaluate(elementIsInteractable);
+    return { locator, count, interactable };
+  } catch {
+    return { locator, count: 0, interactable: false };
+  }
+}
+
+async function isFormField(page: Page, locator: FlowLocator): Promise<boolean> {
+  try {
+    return await toLocator(page, locator).evaluate(
+      (element) =>
+        element.tagName === "INPUT" ||
+        element.tagName === "TEXTAREA" ||
+        element.tagName === "SELECT",
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function visibleSurface(
+  page: Page,
+  locator: FlowLocator,
+): Promise<FlowLocator | undefined> {
+  let described: SurfaceDescription | null;
+  try {
+    described = await toLocator(page, locator).evaluate(describeVisibleSurface);
+  } catch {
+    return undefined;
+  }
+  if (described === null) {
+    return undefined;
+  }
+  const viable: FlowLocator[] = [];
+  for (const candidate of locatorsFromSurface(described)) {
+    const probed = await probeLocator(page, candidate);
+    if (probed.count === 1 && probed.interactable) {
+      viable.push(candidate);
+    }
+  }
+  if (viable.length === 0) {
+    return undefined;
+  }
+  return rankCandidates(viable);
+}
+
+function locatorsFromSurface(surface: SurfaceDescription): FlowLocator[] {
+  const locators: FlowLocator[] = [];
+  if (surface.role !== undefined && surface.name !== undefined) {
+    locators.push({ type: "role", role: surface.role, name: surface.name });
+  }
+  if (surface.testId !== undefined) {
+    locators.push({ type: "testid", name: surface.testId });
+  }
+  if (surface.text !== undefined) {
+    locators.push({ type: "text", text: surface.text });
+  }
+  if (surface.css !== undefined) {
+    locators.push({ type: "css", selector: surface.css });
+  }
+  return locators;
+}
+
+function orderByPreference(locators: readonly FlowLocator[]): FlowLocator[] {
+  const remaining = [...locators];
+  const ordered: FlowLocator[] = [];
+  while (remaining.length > 0) {
+    let next: FlowLocator;
+    try {
+      next = rankCandidates(remaining);
+    } catch {
+      break;
+    }
+    ordered.push(next);
+    const index = remaining.indexOf(next);
+    if (index < 0) {
+      break;
+    }
+    remaining.splice(index, 1);
+  }
+  return ordered;
+}
+
+function withResolved(
+  action: DiscoveryAction,
+  locator: FlowLocator,
+): DiscoveryAction {
+  return { ...action, resolvedLocator: locator };
+}
+
+function elementIsInteractable(element: Element): boolean {
+  const style = window.getComputedStyle(element);
+  if (
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    style.pointerEvents === "none" ||
+    Number(style.opacity) === 0
+  ) {
+    return false;
+  }
+  if (
+    element.getAttribute("aria-hidden") === "true" ||
+    element.hasAttribute("hidden")
+  ) {
+    return false;
+  }
+  const rect = element.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) {
+    return false;
+  }
+  const view = element.ownerDocument.defaultView;
+  if (view === null) {
+    return false;
+  }
+  if (
+    rect.bottom <= 0 ||
+    rect.right <= 0 ||
+    rect.top >= view.innerHeight ||
+    rect.left >= view.innerWidth
+  ) {
+    return false;
+  }
+  if (
+    (element instanceof HTMLInputElement ||
+      element instanceof HTMLButtonElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement) &&
+    element.disabled
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Runs in the page. Helpers are nested so Playwright can send this function
+ * without the module's other functions.
+ */
+function describeVisibleSurface(element: Element): SurfaceDescription | null {
+  const tag = element.tagName;
+  if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
+    return null;
+  }
+  const container = element.closest(".ui-select-container");
+  const root =
+    container !== null && container !== element
+      ? container
+      : element.parentElement;
+  if (root === null) {
+    return null;
+  }
+  const selectors = [
+    ".ui-select-placeholder",
+    ".ui-select-toggle",
+    ".ui-select-match",
+    "[role='combobox']",
+    "[role='button']",
+  ];
+  for (const selector of selectors) {
+    for (const node of root.querySelectorAll(selector)) {
+      if (node === element) {
+        continue;
+      }
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const view = node.ownerDocument.defaultView;
+      const shown =
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.pointerEvents !== "none" &&
+        Number(style.opacity) !== 0 &&
+        node.getAttribute("aria-hidden") !== "true" &&
+        !node.hasAttribute("hidden") &&
+        rect.width >= 2 &&
+        rect.height >= 2 &&
+        view !== null &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < view.innerHeight &&
+        rect.left < view.innerWidth;
+      if (!shown) {
+        continue;
+      }
+      const described: SurfaceDescription = {};
+      if (node.id.length > 0) {
+        described.css = `#${CSS.escape(node.id)}`;
+      } else if (root.id.length > 0) {
+        const classes = [...node.classList];
+        const classSelector =
+          classes.length > 0
+            ? `${node.tagName.toLowerCase()}.${classes.map((name) => CSS.escape(name)).join(".")}`
+            : node.tagName.toLowerCase();
+        described.css = `#${CSS.escape(root.id)} ${classSelector}`;
+      }
+      const testId = node.getAttribute("data-testid")?.trim() ?? "";
+      if (testId.length > 0) {
+        described.testId = testId;
+      }
+      const role = node.getAttribute("role")?.trim() ?? "";
+      const label = node.getAttribute("aria-label")?.trim() ?? "";
+      if (role.length > 0 && label.length > 0) {
+        described.role = role;
+        described.name = label;
+      }
+      const text = node.textContent?.trim() ?? "";
+      if (text.length > 0 && text.length <= 80) {
+        described.text = text;
+      }
+      return described;
+    }
+  }
+  return null;
 }

@@ -71,11 +71,19 @@ export function rankCandidates(candidates: readonly Locator[]): Locator {
  * the action has no rankable candidate.
  */
 export function chooseLocator(action: DiscoveryAction): Locator | undefined {
+  if (action.resolvedLocator !== undefined) {
+    return action.resolvedLocator;
+  }
   const candidates = collectCandidates(action);
   if (candidates.length === 0) {
     return undefined;
   }
   return rankCandidates(candidates);
+}
+
+/** Every locator `chooseLocator` would consider, before preference ranking. */
+export function locatorCandidates(action: DiscoveryAction): Locator[] {
+  return collectCandidates(action);
 }
 
 function preferenceRank(locator: Locator): number | undefined {

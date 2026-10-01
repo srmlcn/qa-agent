@@ -1,4 +1,5 @@
 import { QaError } from "../errors/qa-error.js";
+import type { Locator } from "../flows/schema.js";
 
 export interface AgentActionLike {
   type?: unknown;
@@ -44,6 +45,11 @@ export interface DiscoveryAction {
   urlAfter: string;
   arguments: unknown;
   screenshotPath?: string;
+  /**
+   * Locator confirmed on a live page. When set, compilation uses it
+   * instead of ranking recorded attributes.
+   */
+  resolvedLocator?: Locator;
 }
 
 export interface DiscoveryTrajectory {
