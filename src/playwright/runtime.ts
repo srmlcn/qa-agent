@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { createServer } from "node:net";
 import {
   chromium,
   type Browser,
@@ -33,6 +34,11 @@ export type StartBrowserOptions = {
    * Forwarded to the context as-is. This module does not resolve auth profiles.
    */
   storageState?: string;
+  /**
+   * Listen on a loopback remote-debugging port and resolve its websocket URL.
+   * Stagehand attaches through that URL. Other launches leave this unset.
+   */
+  remoteDebugging?: boolean;
   recordVideo?: {
     dir: string;
     size: { width: number; height: number };
@@ -43,6 +49,11 @@ export type BrowserSession = {
   browser: Browser;
   context: BrowserContext;
   page: Page;
+  /**
+   * Chrome DevTools websocket URL when `remoteDebugging` is set.
+   * This is `webSocketDebuggerUrl` from `/json/version`, not the HTTP base.
+   */
+  cdpUrl?: string;
   close: () => Promise<void>;
 };
 
@@ -103,8 +114,19 @@ export async function startBrowser(
   signal?.addEventListener("abort", onAbort);
 
   try {
-    const launched = await launchChromium(options);
+    const debuggingPort =
+      options.remoteDebugging === true ? await reserveLoopbackPort() : undefined;
+    const launched = await launchChromium(options, debuggingPort);
     browser = launched;
+    if (closeRequested || signal?.aborted) {
+      await close();
+      throw cancelled();
+    }
+
+    const cdpUrl =
+      debuggingPort === undefined
+        ? undefined
+        : await readWebSocketDebuggerUrl(debuggingPort, options);
     if (closeRequested || signal?.aborted) {
       await close();
       throw cancelled();
@@ -123,7 +145,13 @@ export async function startBrowser(
       throw cancelled();
     }
 
-    return { browser, context, page, close };
+    return {
+      browser,
+      context,
+      page,
+      close,
+      ...(cdpUrl === undefined ? {} : { cdpUrl }),
+    };
   } catch (error) {
     await close();
     if (signal?.aborted) {
@@ -133,10 +161,19 @@ export async function startBrowser(
   }
 }
 
-async function launchChromium(options: StartBrowserOptions): Promise<Browser> {
+async function launchChromium(
+  options: StartBrowserOptions,
+  debuggingPort: number | undefined,
+): Promise<Browser> {
   const launchOptions: LaunchOptions = {
     headless: options.headless ?? true,
   };
+  if (debuggingPort !== undefined) {
+    launchOptions.args = [
+      `--remote-debugging-port=${debuggingPort}`,
+      "--remote-debugging-address=127.0.0.1",
+    ];
+  }
   const executablePath = installedChromiumExecutable();
   if (executablePath !== undefined) {
     launchOptions.executablePath = executablePath;
@@ -157,6 +194,136 @@ async function launchChromium(options: StartBrowserOptions): Promise<Browser> {
     }
     throw error;
   }
+}
+
+const DEBUGGER_POLL_MS = 100;
+const DEBUGGER_ATTEMPT_MS = 1_000;
+const DEFAULT_DEBUGGER_WAIT_MS = 15_000;
+
+async function reserveLoopbackPort(): Promise<number> {
+  try {
+    return await new Promise((resolve, reject) => {
+      const server = createServer();
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address();
+        if (address === null || typeof address === "string") {
+          server.close();
+          reject(new Error("Could not reserve a loopback port."));
+          return;
+        }
+        const port = address.port;
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve(port);
+        });
+      });
+    });
+  } catch {
+    throw new QaError({
+      code: "BROWSER_CRASHED",
+      message: "Could not reserve a loopback debugging port.",
+    });
+  }
+}
+
+/**
+ * Chromium publishes the attachable endpoint as `webSocketDebuggerUrl`.
+ * The HTTP base `http://127.0.0.1:<port>` is not a websocket and answers
+ * a Stagehand handshake with `Unexpected server response: 404`.
+ */
+async function readWebSocketDebuggerUrl(
+  port: number,
+  options: StartBrowserOptions,
+): Promise<string> {
+  const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_DEBUGGER_WAIT_MS);
+  while (Date.now() < deadline) {
+    if (options.signal?.aborted) {
+      throw cancelled();
+    }
+    const url = await readVersionWebsocket(port, options.signal);
+    if (url !== undefined) {
+      return url;
+    }
+    await delay(DEBUGGER_POLL_MS, options.signal);
+  }
+  throw new QaError({
+    code: "BROWSER_CRASHED",
+    message: "Chromium did not expose a loopback websocket debugger URL.",
+  });
+}
+
+async function readVersionWebsocket(
+  port: number,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  const timeout = AbortSignal.timeout(DEBUGGER_ATTEMPT_MS);
+  const attempt =
+    signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
+      redirect: "error",
+      signal: attempt,
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+    return loopbackWebsocket(await response.json(), port);
+  } catch {
+    if (signal?.aborted) {
+      throw cancelled();
+    }
+    return undefined;
+  }
+}
+
+function loopbackWebsocket(body: unknown, expectedPort: number): string | undefined {
+  if (typeof body !== "object" || body === null || !("webSocketDebuggerUrl" in body)) {
+    return undefined;
+  }
+  const value = (body as { webSocketDebuggerUrl?: unknown }).webSocketDebuggerUrl;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(value);
+    const websocket = parsed.protocol === "ws:" || parsed.protocol === "wss:";
+    if (
+      !websocket ||
+      !isLoopbackHost(parsed.hostname) ||
+      parsed.port !== String(expectedPort)
+    ) {
+      return undefined;
+    }
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(cancelled());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(cancelled());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**

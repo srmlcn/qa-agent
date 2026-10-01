@@ -1,3 +1,22 @@
+## [1.1.3](https://github.com/srmlcn/qa-agent/compare/v1.1.2...v1.1.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* **orchestrator:** apply auth on discovery ([cbae51b](https://github.com/srmlcn/qa-agent/commit/cbae51bd681e52fdc9bd46856f5441ae9167d5b2))
+* **playwright:** expose loopback CDP port ([ad99dcd](https://github.com/srmlcn/qa-agent/commit/ad99dcd44bcee0d379e6a1e97b5010040130770c))
+* **playwright:** require debugger port match ([88297a5](https://github.com/srmlcn/qa-agent/commit/88297a5c883da67499701eb3fd5ee96929a538dd))
+* **stagehand:** attach the v3 discovery agent ([6a44447](https://github.com/srmlcn/qa-agent/commit/6a44447f060bbfd24bd5792a8a57bb23d5572b51))
+
+## [1.1.2](https://github.com/srmlcn/qa-agent/compare/v1.1.1...v1.1.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **config:** raise default playwright timeout ([6cc8553](https://github.com/srmlcn/qa-agent/commit/6cc8553826bea21c94e6f0940dc6c13bf96fe477))
+* **mcp:** allow projectRoot when roots are unsupported ([1cca186](https://github.com/srmlcn/qa-agent/commit/1cca186cda7fb67bddde1f20a82520f8d53767a9))
+* **mcp:** reject failed root discovery ([dd25f51](https://github.com/srmlcn/qa-agent/commit/dd25f51ce7ff0938f18f06558ca8f00e22e043f0))
+
 ## [1.1.1](https://github.com/srmlcn/qa-agent/compare/v1.1.0...v1.1.1) (2026-09-30)
 
 

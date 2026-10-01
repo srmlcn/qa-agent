@@ -589,7 +589,7 @@ playwright:
   browser: chromium
   headless: true
   workers: 4
-  timeoutMs: 30000
+  timeoutMs: 60000
   trace: on-failure
 ```
 
@@ -952,7 +952,7 @@ playwright:
   browser: chromium
   headless: true
   workers: 4
-  timeoutMs: 30000
+  timeoutMs: 60000
 
 evidence:
   screenshots: checkpoints

@@ -65,6 +65,7 @@ test("a successful mocked discovery returns runId and a flow id", async () => {
       authProfile: "owner",
       constraints: ["Do not delete records", "Stay on the save page"],
       maxSteps: 4,
+      projectRoot,
     }),
   );
 
@@ -102,7 +103,7 @@ test("a QaError from discoverFlow is thrown unchanged", async () => {
   vi.mocked(discoverFlow).mockRejectedValue(error);
 
   await withCwd(projectRoot, () =>
-    expect(tool.handler({ objective: "Save the page" })).rejects.toBe(error),
+    expect(tool.handler({ objective: "Save the page", projectRoot })).rejects.toBe(error),
   );
   expect(vi.mocked(discoverFlow).mock.calls[0]?.[0]?.objective).toBe("Save the page");
 });

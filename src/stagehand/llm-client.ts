@@ -1,18 +1,23 @@
+import { createOpenAI } from "@ai-sdk/openai";
 import {
-  CustomOpenAIClient,
+  AISdkClient,
   Stagehand,
   type LLMClient,
   type V3Options,
 } from "@browserbasehq/stagehand";
-import OpenAI, { type ClientOptions } from "openai";
-import type { Browser } from "playwright";
 import { QaError } from "../errors/qa-error.js";
 import type { LlmProvider } from "./provider.js";
 
+type StagehandLanguageModel = ConstructorParameters<typeof AISdkClient>[0]["model"];
+
 /**
- * Chat-completions client for `openai-compatible` only.
+ * OpenAI-compatible client for Stagehand v3.
  * Named providers use Stagehand's client inside {@link createStagehand}.
  * The API key is read from `process.env[provider.apiKeyEnv]`.
+ *
+ * `V3AgentHandler.prepareAgent` calls `getLanguageModel()`. The chat-completions
+ * client Stagehand exports for custom OpenAI endpoints does not implement that
+ * method, so this returns an {@link AISdkClient} that does.
  */
 export function createStagehandClient(provider: LlmProvider): LLMClient {
   if (provider.provider !== "openai-compatible") {
@@ -23,18 +28,30 @@ export function createStagehandClient(provider: LlmProvider): LLMClient {
   }
 
   const apiKey = requireApiKey(provider);
-  const client = new OpenAI({
+  const model = createOpenAI({
     apiKey,
     baseURL: provider.baseUrl,
-    defaultHeaders: requestHeaders(provider.headers, apiKey),
-    timeout: provider.timeoutMs,
-    maxRetries: provider.maxRetries,
-    fetch: guardedFetch(apiKey),
-  });
-  return new CustomOpenAIClient({
-    modelName: provider.model,
-    client,
-  });
+    headers: requestHeaders(provider.headers, apiKey),
+    fetch: guardedFetch(apiKey, provider.timeoutMs),
+  }).chat(provider.model);
+  return new AgentLanguageClient(model);
+}
+
+/**
+ * Public {@link AISdkClient} stores the model privately and does not expose it.
+ * The v3 agent reads it through `getLanguageModel()`.
+ */
+class AgentLanguageClient extends AISdkClient {
+  private readonly languageModel: StagehandLanguageModel;
+
+  constructor(languageModel: StagehandLanguageModel) {
+    super({ model: languageModel });
+    this.languageModel = languageModel;
+  }
+
+  getLanguageModel(): StagehandLanguageModel {
+    return this.languageModel;
+  }
 }
 
 /** Throws `LLM_PROVIDER_UNAVAILABLE` when the provider API key is missing. */
@@ -52,29 +69,57 @@ export function requireApiKey(provider: LlmProvider): string {
 /**
  * Local Stagehand instance for `provider`.
  *
- * Stagehand v3 has no constructor field for an existing Playwright page. It
- * can attach a browser only through `localBrowserLaunchOptions.cdpUrl`, and
- * the installed Playwright `Browser` does not expose that URL. This function
- * does not call `init()`, so it does not launch a separate local Chromium.
- * `close()` still stops that Chromium if a later `init()` launched one.
+ * Discovery always forwards an AbortSignal to `agent.execute`. Installed
+ * Stagehand 3.x treats that signal as experimental, so every instance sets
+ * `experimental` together with `disableAPI`.
+ *
+ * `cdpUrl` is Chromium's `webSocketDebuggerUrl`. An HTTP debugging base makes
+ * the websocket handshake fail with `Unexpected server response: 404`.
+ * This function does not call `init()`.
  */
 export function createStagehand(
   provider: LlmProvider,
-  browser: Browser,
+  cdpUrl?: string,
 ): Stagehand {
+  const endpoint = cdpUrl === undefined ? undefined : websocketDebuggerUrl(cdpUrl);
   const options: V3Options = {
     env: "LOCAL",
     disablePino: true,
     verbose: 0,
     disableAPI: true,
+    experimental: true,
     logger: () => undefined,
     ...stagehandModelOptions(provider),
   };
-  const endpoint = browserCdpUrl(browser);
   if (endpoint !== undefined) {
     options.localBrowserLaunchOptions = { cdpUrl: endpoint };
   }
   return new Stagehand(options);
+}
+
+function websocketDebuggerUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw invalidDebuggerUrl();
+  }
+  const websocket = parsed.protocol === "ws:" || parsed.protocol === "wss:";
+  if (!websocket || !isLoopbackHost(parsed.hostname)) {
+    throw invalidDebuggerUrl();
+  }
+  return value;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+function invalidDebuggerUrl(): QaError {
+  return new QaError({
+    code: "BROWSER_CRASHED",
+    message: "Stagehand requires a loopback websocket debugger URL.",
+  });
 }
 
 function stagehandModelOptions(
@@ -116,17 +161,6 @@ function stagehandHeaders(
   return result;
 }
 
-function browserCdpUrl(browser: Browser): string | undefined {
-  if (!("cdpUrl" in browser)) {
-    return undefined;
-  }
-  const value = browser.cdpUrl;
-  if (typeof value !== "string" || value.length === 0) {
-    return undefined;
-  }
-  return value;
-}
-
 function readApiKey(envName: string): string | undefined {
   const value = process.env[envName];
   if (typeof value !== "string" || value.length === 0) {
@@ -150,28 +184,28 @@ function requestHeaders(
   return headers;
 }
 
-function guardedFetch(apiKey: string): NonNullable<ClientOptions["fetch"]> {
-  const fetchImpl: NonNullable<ClientOptions["fetch"]> = async (url, init) => {
+function guardedFetch(apiKey: string, timeoutMs: number): typeof fetch {
+  const fetchImpl: typeof fetch = async (url, init) => {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal =
+      init?.signal === undefined || init.signal === null
+        ? timeout
+        : AbortSignal.any([init.signal, timeout]);
     let response: Response;
     try {
-      response = await globalThis.fetch(
-        url as Parameters<typeof fetch>[0],
-        init as Parameters<typeof fetch>[1],
-      );
+      response = await globalThis.fetch(url, { ...init, signal });
     } catch (error) {
       throw redactError(error, apiKey);
     }
     if (response.ok) {
-      return response as unknown as Awaited<
-        ReturnType<NonNullable<ClientOptions["fetch"]>>
-      >;
+      return response;
     }
     const body = stripSecret(await response.text(), apiKey);
     return new Response(body, {
       status: response.status,
       statusText: stripSecret(response.statusText, apiKey),
       headers: redactHeaders(response.headers, apiKey),
-    }) as unknown as Awaited<ReturnType<NonNullable<ClientOptions["fetch"]>>>;
+    });
   };
   return fetchImpl;
 }

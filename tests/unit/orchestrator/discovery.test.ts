@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { saveProfile } from "../../../src/auth/store.js";
 import type { ProjectConfig } from "../../../src/config/schema.js";
 import { QaError } from "../../../src/errors/qa-error.js";
 import { transition } from "../../../src/flows/state.js";
@@ -212,6 +213,54 @@ test("an unallowlisted compiled goto never launches the replay browser", async (
     `allow:${START_URL}`,
     "allow:http://evil.test/secret",
   ]);
+});
+
+test("authProfile storage state is shared by discovery and replay", async () => {
+  const previousHome = process.env.AUTONOMOUS_QA_HOME;
+  const home = mkdtempSync(join(tmpdir(), "aqa-discover-auth-"));
+  process.env.AUTONOMOUS_QA_HOME = home;
+  try {
+    const saved = saveProfile(
+      "demo-app",
+      "owner",
+      {
+        cookies: [
+          {
+            name: "session",
+            value: "profile-marker",
+            domain: "127.0.0.1",
+            path: "/",
+            expires: -1,
+            httpOnly: true,
+            secure: false,
+            sameSite: "Lax",
+          },
+        ],
+        origins: [],
+      },
+      { projectRoot },
+    );
+    vi.mocked(discover).mockResolvedValue(clickTrajectory());
+
+    await discoverFlow({
+      ...input(START_URL),
+      authProfile: "owner",
+    });
+
+    expect(vi.mocked(discover).mock.calls[0]?.[0]).toMatchObject({
+      storageState: saved.path,
+    });
+    expect(vi.mocked(startBrowser).mock.calls[0]?.[0]).toMatchObject({
+      storageState: saved.path,
+    });
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.AUTONOMOUS_QA_HOME;
+    } else {
+      process.env.AUTONOMOUS_QA_HOME = previousHome;
+    }
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("a disallowed start URL never launches the replay browser", async () => {

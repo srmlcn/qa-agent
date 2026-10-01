@@ -85,7 +85,7 @@ test("a fake fetch returns one structured step and does not use the network", as
       response_format?: { type?: string };
     };
     expect(body.model).toBe(provider.model);
-    expect(body.response_format).toEqual({ type: "json_object" });
+    expect(body.response_format).toMatchObject({ type: "json_schema" });
     return new Response(completionBody(JSON.stringify({ step: "archive" })), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -95,6 +95,10 @@ test("a fake fetch returns one structured step and does not use the network", as
 
   const logs: string[] = [];
   const client = createStagehandClient(provider);
+  expect(typeof client.getLanguageModel).toBe("function");
+  const languageModel = client.getLanguageModel?.();
+  expect(languageModel?.modelId).toBe(provider.model);
+  expect(languageModel?.provider).toContain("openai");
   const result = await client.createChatCompletion({
     options: {
       messages: [{ role: "user", content: "Archive the project" }],
@@ -108,7 +112,7 @@ test("a fake fetch returns one structured step and does not use the network", as
     },
   });
 
-  expect(result).toEqual({
+  expect(result).toMatchObject({
     data: { step: "archive" },
     usage: {
       prompt_tokens: 4,
@@ -144,13 +148,12 @@ test("openai uses Stagehand's OpenAI client", async () => {
       headers: { "X-Tenant": "acme" },
     }),
   );
-  const stagehand = createStagehand(
-    provider,
-    {} as Parameters<typeof createStagehand>[1],
-  );
+  const stagehand = createStagehand(provider);
   try {
     const opts = stagehandOptions(stagehand);
     expect(opts.llmClient).toBeUndefined();
+    expect(opts.experimental).toBe(true);
+    expect(opts.disableAPI).toBe(true);
     expect(opts.model).toMatchObject({
       modelName: "openai/gpt-5.4",
       baseURL: "https://gateway.example/v1/",
@@ -176,13 +179,11 @@ test("anthropic uses Stagehand's Anthropic client", async () => {
       baseUrl: undefined,
     }),
   );
-  const stagehand = createStagehand(
-    provider,
-    {} as Parameters<typeof createStagehand>[1],
-  );
+  const stagehand = createStagehand(provider);
   try {
     const opts = stagehandOptions(stagehand);
     expect(opts.llmClient).toBeUndefined();
+    expect(opts.experimental).toBe(true);
     expect(opts.model).toMatchObject({
       modelName: "anthropic/claude-sonnet-4-6",
       baseURL: "https://api.anthropic.com/v1",
@@ -204,13 +205,11 @@ test("xai uses Stagehand's xAI client", async () => {
       baseUrl: undefined,
     }),
   );
-  const stagehand = createStagehand(
-    provider,
-    {} as Parameters<typeof createStagehand>[1],
-  );
+  const stagehand = createStagehand(provider);
   try {
     const opts = stagehandOptions(stagehand);
     expect(opts.llmClient).toBeUndefined();
+    expect(opts.experimental).toBe(true);
     expect(opts.model).toMatchObject({
       modelName: "xai/grok-4",
       baseURL: "https://api.x.ai/v1",
@@ -294,18 +293,53 @@ test("an error response that echoes the API key does not throw the key", async (
 test("Stagehand constructor options stay local", async () => {
   process.env[API_KEY_ENV] = API_KEY;
   const provider = createProvider(llmConfig());
-  const stagehand = createStagehand(
-    provider,
-    {} as Parameters<typeof createStagehand>[1],
-  );
+  const stagehand = createStagehand(provider);
   try {
-    const opts = (stagehand as { opts?: { env?: string } }).opts;
-    expect(opts?.env).toBe("LOCAL");
-    expect(opts?.env).not.toBe("BROWSERBASE");
+    const opts = stagehandOptions(stagehand);
+    expect(opts.env).toBe("LOCAL");
+    expect(opts.experimental).toBe(true);
+    expect(opts.disableAPI).toBe(true);
+    expect(opts.llmClient).toBeDefined();
+    expect(typeof opts.llmClient?.getLanguageModel).toBe("function");
+    expect(opts.llmClient?.getLanguageModel?.().modelId).toBe(provider.model);
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   } finally {
     await stagehand.close();
   }
+});
+
+test("stagehand stores a loopback websocket debugger URL", async () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(llmConfig());
+  const cdpUrl = "ws://127.0.0.1:9222/devtools/browser/test-id";
+  const stagehand = createStagehand(provider, cdpUrl);
+  try {
+    const opts = stagehandOptions(stagehand);
+    expect(opts.localBrowserLaunchOptions?.cdpUrl).toBe(cdpUrl);
+    expect(opts.experimental).toBe(true);
+  } finally {
+    await stagehand.close();
+  }
+});
+
+test("an HTTP debugging base is rejected", () => {
+  process.env[API_KEY_ENV] = API_KEY;
+  const provider = createProvider(llmConfig());
+  let thrown: unknown;
+  try {
+    createStagehand(provider, "http://127.0.0.1:9222");
+  } catch (error: unknown) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(QaError);
+  if (!(thrown instanceof QaError)) {
+    return;
+  }
+  expect(thrown.code).toBe("BROWSER_CRASHED");
+  expect(thrown.message).toBe(
+    "Stagehand requires a loopback websocket debugger URL.",
+  );
+  expect(thrown.message).not.toContain(API_KEY);
 });
 
 test("no other src file imports Stagehand", () => {
@@ -320,10 +354,29 @@ test("no other src file imports Stagehand", () => {
 });
 
 function stagehandOptions(stagehand: object): {
-  llmClient?: unknown;
+  env?: string;
+  experimental?: boolean;
+  disableAPI?: boolean;
+  llmClient?: {
+    getLanguageModel?: () => { modelId?: string; provider?: string };
+  };
   model?: V3Options["model"];
+  localBrowserLaunchOptions?: { cdpUrl?: string };
 } {
-  return (stagehand as { opts: { llmClient?: unknown; model?: V3Options["model"] } }).opts;
+  return (
+    stagehand as {
+      opts: {
+        env?: string;
+        experimental?: boolean;
+        disableAPI?: boolean;
+        llmClient?: {
+          getLanguageModel?: () => { modelId?: string; provider?: string };
+        };
+        model?: V3Options["model"];
+        localBrowserLaunchOptions?: { cdpUrl?: string };
+      };
+    }
+  ).opts;
 }
 
 function nativeClient(stagehand: object): {
