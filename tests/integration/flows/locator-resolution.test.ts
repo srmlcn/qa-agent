@@ -309,6 +309,24 @@ const duplicatePlaceholderHtml = `<!DOCTYPE html>
   </body>
 </html>`;
 
+const looseInputHtml = `<!DOCTYPE html>
+<html>
+  <body>
+    <button id="unrelated" role="button">Go</button>
+    <input id="focusser" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+  </body>
+</html>`;
+
+test("a hidden input outside a widget is not retargeted to a page button", async () => {
+  await show(looseInputHtml);
+  const pending = resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({ selector: "//input[@id='focusser']" }),
+  ]));
+
+  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
+  await expect(pending).rejects.toThrow(/no visible surface/);
+});
+
 test("a reload starts a new document at the same URL", async () => {
   const served = await serveHtml(hiddenSelectHtml);
   try {

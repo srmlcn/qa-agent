@@ -586,13 +586,10 @@ function describeVisibleSurface(element: Element): SurfaceDescription | null {
     return null;
   }
   const container = element.closest(".ui-select-container");
-  const root =
-    container !== null && container !== element
-      ? container
-      : element.parentElement;
-  if (root === null) {
+  if (container === null || container === element) {
     return null;
   }
+  const root = container;
   const selectors = [
     ".ui-select-placeholder",
     ".ui-select-toggle",
