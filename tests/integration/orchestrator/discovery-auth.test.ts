@@ -38,7 +38,7 @@ const SUBMIT_LOCATOR: Locator = {
 };
 
 test(
-  "discovery attaches to the authenticated browser and replay keeps the profile",
+  "discovery attaches to the authenticated browser and saves the profile",
   async () => {
     const previousHome = process.env.AUTONOMOUS_QA_HOME;
     const previousKey = process.env[API_KEY_ENV];

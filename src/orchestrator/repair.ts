@@ -11,20 +11,12 @@ import { read, save } from "../flows/repository.js";
 import type { FlowSpec } from "../flows/schema.js";
 import { stringifyFlow } from "../flows/serialize.js";
 import { transition } from "../flows/state.js";
-import { validateFlow } from "../flows/validator.js";
-import { startBrowser, type BrowserSession } from "../playwright/runtime.js";
 import { assertUrlAllowed } from "../security/hosts.js";
 import { assertActionAllowed } from "../security/policy.js";
 import type { LlmProvider } from "../stagehand/provider.js";
 import { discover, type DiscoverOptions } from "../stagehand/session.js";
-import { complete, createRun, setOnCancel } from "./runs.js";
+import { complete, createRun } from "./runs.js";
 
-/**
- * `startBrowser` applies one timeout to process launch and to the page.
- * Locator waits use `playwright.timeoutMs`. Launch keeps a floor so a short
- * action timeout cannot abort Chromium startup.
- */
-const MIN_LAUNCH_TIMEOUT_MS = 30_000;
 const PRIVATE_FILE_MODE = 0o600;
 const PREVIOUS_FLOW_FILE = "previous-flow.yml";
 
@@ -47,13 +39,6 @@ export type RepairFlowResult =
       runId: string;
     }
   | {
-      repaired: false;
-      reason: "replay-failure";
-      runId: string;
-      repairRunId: string;
-      result: RunResult;
-    }
-  | {
       repaired: true;
       runId: string;
       repairRunId: string;
@@ -66,8 +51,9 @@ export type RepairFlowResult =
  * The stored run must belong to this flow. A missing run and a run recorded
  * for a different flow are both `run not found`, and neither starts discovery.
  * Any other category is a product failure: the discovery client is not called.
- * A successful replay follows stale -> repaired -> validated and archives the
- * previous spec under the original run. The original run result stays readable.
+ * A successful discovery follows stale -> repaired -> validated and archives the
+ * previous spec under the original run. The clicks are not replayed. The
+ * original run result stays readable.
  */
 export async function repairFlow(
   input: RepairFlowInput,
@@ -103,6 +89,7 @@ export async function repairFlow(
     provider: input.provider,
     maxSteps: input.config.stagehand.maxSteps,
     signal,
+    ...(storageState === undefined ? {} : { storageState }),
     ...(input.client === undefined ? {} : { client: input.client }),
   });
 
@@ -122,47 +109,29 @@ export async function repairFlow(
   // `transition` does not replace steps. Take the legal stale edge, then
   // substitute the compiled steps before `validate` moves repaired to validated.
   const marked = transition(stored, "mark-repaired");
-  const candidate: FlowSpec = {
-    ...marked,
-    steps: compiled.steps,
-    assertions: stored.assertions,
-  };
-
-  const replayed = await replayCandidate(
-    input,
-    candidate,
-    repairRunId,
-    signal,
-    storageState,
+  const flow = transition(
+    {
+      ...marked,
+      steps: compiled.steps,
+      assertions: stored.assertions,
+    },
+    "validate",
   );
+
   const builder = startRun({ runId: repairRunId, flowId: input.flowId });
-  if (replayed.ok) {
-    recordPassed(builder, replayed.flow);
-    save(input.projectRoot, replayed.flow);
-    writePreviousFlow(input.projectRoot, input.runId, stored);
-  } else {
-    recordFailure(builder, candidate, replayed.error);
-  }
+  recordPassed(builder, flow);
+  save(input.projectRoot, flow);
+  writePreviousFlow(input.projectRoot, input.runId, stored);
 
   const result = builder.finish();
   complete(repairRunId, result);
   writeRun(input.projectRoot, result);
 
-  if (replayed.ok) {
-    return {
-      repaired: true,
-      runId: input.runId,
-      repairRunId,
-      flow: replayed.flow,
-      result,
-    };
-  }
-
   return {
-    repaired: false,
-    reason: "replay-failure",
+    repaired: true,
     runId: input.runId,
     repairRunId,
+    flow,
     result,
   };
 }
@@ -241,44 +210,6 @@ function semanticFallbackOf(
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-async function replayCandidate(
-  input: RepairFlowInput,
-  flow: FlowSpec,
-  runId: string,
-  signal: AbortSignal,
-  storageState: string | undefined,
-): Promise<Awaited<ReturnType<typeof validateFlow>>> {
-  let session: BrowserSession | undefined;
-  setOnCancel(runId, () => {
-    if (session === undefined) {
-      return;
-    }
-    void session.close().catch(() => {
-      // The abort signal already stops the run. Close failures surface from `finally`.
-    });
-  });
-
-  try {
-    session = await startBrowser({
-      browser: input.config.playwright.browser,
-      headless: input.config.playwright.headless,
-      timeoutMs: Math.max(
-        input.config.playwright.timeoutMs,
-        MIN_LAUNCH_TIMEOUT_MS,
-      ),
-      signal,
-      ...(storageState === undefined ? {} : { storageState }),
-    });
-    return await validateFlow({
-      flow,
-      page: session.page,
-      timeoutMs: input.config.playwright.timeoutMs,
-    });
-  } finally {
-    await session?.close();
-  }
-}
-
 function writePreviousFlow(
   projectRoot: string,
   runId: string,
@@ -296,39 +227,6 @@ function writePreviousFlow(
 function recordPassed(builder: RunBuilder, flow: FlowSpec): void {
   for (const step of flow.steps) {
     builder.stepPassed(stepIdOf(step));
-  }
-}
-
-/**
- * `validateFlow` stops at the first replay failure. Steps before that id ran.
- */
-function recordFailure(
-  builder: RunBuilder,
-  flow: FlowSpec,
-  error: QaError,
-): void {
-  const failedAt = error.stepId;
-  const first = flow.steps[0];
-  if (failedAt === undefined) {
-    builder.stepFailed(
-      first === undefined ? "validation" : stepIdOf(first),
-      error,
-    );
-    return;
-  }
-
-  let recorded = false;
-  for (const step of flow.steps) {
-    const id = stepIdOf(step);
-    if (id === failedAt) {
-      builder.stepFailed(id, error);
-      recorded = true;
-      break;
-    }
-    builder.stepPassed(id);
-  }
-  if (!recorded) {
-    builder.stepFailed(failedAt, error);
   }
 }
 

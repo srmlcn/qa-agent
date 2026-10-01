@@ -121,7 +121,7 @@ test("a page-error failure does not call the discovery client", async () => {
 });
 
 test(
-  "a locator failure rediscovers, replays, and saves validated",
+  "a locator failure rediscovers and saves validated",
   async () => {
     const runId = "run-locator-failed";
     const before = seedFlow();
@@ -189,7 +189,7 @@ test(
 );
 
 test(
-  "a failed replay leaves the flow stale and keeps the original run",
+  "a rediscovery whose click target is gone is still saved as validated",
   async () => {
     const runId = "run-replay-failed";
     const before = seedFlow();
@@ -209,20 +209,21 @@ test(
     });
 
     expect(run).toHaveBeenCalledTimes(1);
-    expect(outcome.repaired).toBe(false);
-    if (outcome.repaired || outcome.reason !== "replay-failure") {
-      throw new Error("expected a replay failure");
+    expect(outcome.repaired).toBe(true);
+    if (outcome.repaired !== true) {
+      return;
     }
     expect(outcome.runId).toBe(runId);
     expect(outcome.repairRunId).not.toBe(runId);
-    expect(read(projectRoot, FLOW_ID)).toEqual(before);
-    expect(read(projectRoot, FLOW_ID).state).toBe("stale");
+    expect(outcome.flow.state).toBe("validated");
+    expect(outcome.flow.assertions).toEqual(before.assertions);
+    expect(outcome.result.status).toBe("passed");
+    const saved = read(projectRoot, FLOW_ID);
+    expect(saved.state).toBe("validated");
+    expect(saved.steps).not.toEqual(before.steps);
     expect(["failed", "error"]).toContain(readRun(projectRoot, runId).status);
-    expect(["failed", "error"]).toContain(outcome.result.status);
-    expect(["failed", "error"]).toContain(
-      readRun(projectRoot, outcome.repairRunId).status,
-    );
-    expect(["failed", "error"]).toContain(getRun(outcome.repairRunId).status);
+    expect(readRun(projectRoot, outcome.repairRunId).status).toBe("passed");
+    expect(getRun(outcome.repairRunId).status).toBe("passed");
     expect(
       existsSync(
         join(
@@ -233,7 +234,7 @@ test(
           "previous-flow.yml",
         ),
       ),
-    ).toBe(false);
+    ).toBe(true);
   },
   TEST_TIMEOUT_MS,
 );

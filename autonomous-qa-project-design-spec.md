@@ -427,9 +427,13 @@ When compiling a target, prefer:
 
 ### Compiler validation
 
-Every generated step must be replayed by Playwright before the flow is considered valid.
+A successful Stagehand trajectory is the proof that the generated clicks were possible.
 
-A flow is not saved as `validated` merely because Stagehand reported success.
+The page left after those clicks is not the page they started on. A control can exist only while an invoice is unpaid, a menu is open, or a dialog is showing. Probing that end state, or replaying the click sequence to see that each locator still exists, rejects a flow that already succeeded. Loading between one click and the next makes that second pass fragile as well.
+
+Discovery compiles the trajectory and saves it as `validated`. It does not launch a second browser to click the steps again. Playwright replay remains how a saved flow is executed later, on whatever application state that later run starts from.
+
+Locator ranking still prefers a role, label, or other stable target recorded on the action. When the control is still on the page discovery finished on, a hidden field can be retargeted to its visible surface, and a locator that matches multiple elements is still rejected. A control that is simply gone is left as recorded.
 
 ---
 

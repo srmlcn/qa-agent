@@ -138,8 +138,8 @@ test("a matching locator failure still repairs", async () => {
   expect(run).toHaveBeenCalledTimes(1);
   expect(run.mock.calls[0]?.[0]).toContain(OBJECTIVE);
   expect(run.mock.calls[0]?.[0]).toContain(SEMANTIC_FALLBACK);
-  expect(startBrowser).toHaveBeenCalledTimes(1);
-  expect(validateFlow).toHaveBeenCalledTimes(1);
+  expect(startBrowser).not.toHaveBeenCalled();
+  expect(validateFlow).not.toHaveBeenCalled();
   expect(repaired.repaired).toBe(true);
   if (repaired.repaired !== true) {
     return;

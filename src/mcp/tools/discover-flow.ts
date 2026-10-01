@@ -22,14 +22,14 @@ export type DiscoverFlowOutput = {
 };
 
 /**
- * Asks the discovery pipeline for a draft or validated flow.
+ * Asks the discovery pipeline for a validated flow.
  * The handler does not explore the UI. Storage state, cookies, and the API key
  * are not part of the returned object.
  */
 export const tool = {
   name: "qa.discover_flow",
   description:
-    "Discover a flow for an objective and return the draft or validated FlowSpec and run id. Does not explore the UI in this handler.",
+    "Discover a flow for an objective and return the validated FlowSpec and run id. Does not explore the UI in this handler.",
   schema,
   async handler(args: unknown): Promise<DiscoverFlowOutput> {
     const input = schema.parse(args);

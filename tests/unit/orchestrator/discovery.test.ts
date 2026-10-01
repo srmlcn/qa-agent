@@ -80,125 +80,53 @@ afterEach(() => {
   }
 });
 
-test("replay opens the allowlisted start URL before compiled steps", async () => {
+test("a successful trajectory is saved as validated without replaying clicks", async () => {
   vi.mocked(discover).mockResolvedValue(clickTrajectory());
 
   const discovered = await discoverFlow(input(START_URL));
 
-  expect(events).toEqual([
-    `allow:${START_URL}`,
-    `allow:${START_URL}`,
-    `goto:${START_URL}`,
-    "validate",
-  ]);
-  expect(pageGoto).toHaveBeenCalledTimes(1);
-  expect(pageGoto).toHaveBeenCalledWith(START_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 3_000,
-  });
-  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.page).toBe(page);
-  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
-    action: "click",
-  });
+  expect(events).toEqual([`allow:${START_URL}`]);
+  expect(startBrowser).not.toHaveBeenCalled();
+  expect(validateFlow).not.toHaveBeenCalled();
+  expect(pageGoto).not.toHaveBeenCalled();
   expect(discovered.flow.state).toBe("validated");
+  expect(discovered.result.status).toBe("passed");
+  expect(discovered.flow.steps[0]).toMatchObject({ action: "click" });
 });
 
-test("replay uses the base URL when the caller omits startUrl", async () => {
+test("an omitted startUrl is the base URL and does not replay", async () => {
   vi.mocked(discover).mockResolvedValue(clickTrajectory());
 
-  await discoverFlow({
+  const discovered = await discoverFlow({
     ...input(START_URL),
     startUrl: undefined,
   });
 
-  expect(pageGoto).toHaveBeenCalledTimes(1);
-  expect(pageGoto).toHaveBeenCalledWith(START_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 3_000,
+  expect(vi.mocked(discover).mock.calls[0]?.[0]).toMatchObject({
+    startUrl: START_URL,
   });
-  expect(events).toEqual([
-    `allow:${START_URL}`,
-    `allow:${START_URL}`,
-    `goto:${START_URL}`,
-    "validate",
-  ]);
-});
-
-test("a draft that already starts with that goto is not opened twice", async () => {
-  vi.mocked(discover).mockResolvedValue(gotoTrajectory(START_URL));
-
-  await discoverFlow(input(START_URL));
-
+  expect(startBrowser).not.toHaveBeenCalled();
+  expect(validateFlow).not.toHaveBeenCalled();
   expect(pageGoto).not.toHaveBeenCalled();
-  expect(events).toEqual([
-    `allow:${START_URL}`,
-    `allow:${START_URL}`,
-    `allow:${START_URL}`,
-    "validate",
-  ]);
-  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
-    action: "goto",
-    value: START_URL,
-  });
-});
-
-test("an equivalent leading goto is not opened twice", async () => {
-  vi.mocked(discover).mockResolvedValue(gotoTrajectory("/start"));
-
-  await discoverFlow(input(START_URL));
-
-  expect(pageGoto).not.toHaveBeenCalled();
-  expect(events).toEqual([
-    `allow:${START_URL}`,
-    `allow:${START_URL}`,
-    `allow:${START_URL}`,
-    "validate",
-  ]);
-  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
-    action: "goto",
-    value: START_URL,
-  });
-});
-
-test("a different leading goto still opens the discovery start URL first", async () => {
-  vi.mocked(discover).mockResolvedValue(gotoTrajectory(OTHER_URL));
-
-  await discoverFlow(input(START_URL));
-
-  expect(pageGoto).toHaveBeenCalledTimes(1);
-  expect(pageGoto).toHaveBeenCalledWith(START_URL, expect.any(Object));
-  expect(events).toEqual([
-    `allow:${START_URL}`,
-    `allow:${OTHER_URL}`,
-    `allow:${START_URL}`,
-    `goto:${START_URL}`,
-    "validate",
-  ]);
-  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
-    action: "goto",
-    value: OTHER_URL,
-  });
+  expect(discovered.flow.state).toBe("validated");
 });
 
 test("a relative compiled goto is allowlisted against the base URL", async () => {
   vi.mocked(discover).mockResolvedValue(gotoTrajectory("/other"));
 
-  await discoverFlow(input(START_URL));
+  const discovered = await discoverFlow(input(START_URL));
 
-  expect(events).toEqual([
-    `allow:${START_URL}`,
-    `allow:${OTHER_URL}`,
-    `allow:${START_URL}`,
-    `goto:${START_URL}`,
-    "validate",
-  ]);
-  expect(vi.mocked(validateFlow).mock.calls[0]?.[0]?.flow.steps[0]).toMatchObject({
+  expect(events).toEqual([`allow:${START_URL}`, `allow:${OTHER_URL}`]);
+  expect(startBrowser).not.toHaveBeenCalled();
+  expect(validateFlow).not.toHaveBeenCalled();
+  expect(discovered.flow.state).toBe("validated");
+  expect(discovered.flow.steps[0]).toMatchObject({
     action: "goto",
-    value: OTHER_URL,
+    value: "/other",
   });
 });
 
-test("an unallowlisted compiled goto never launches the replay browser", async () => {
+test("an unallowlisted compiled goto never launches a browser", async () => {
   vi.mocked(discover).mockResolvedValue(clickThenGoto("//evil.test/secret"));
 
   const pending = discoverFlow(input(START_URL));
@@ -215,7 +143,7 @@ test("an unallowlisted compiled goto never launches the replay browser", async (
   ]);
 });
 
-test("authProfile storage state is shared by discovery and replay", async () => {
+test("authProfile storage state is passed to discovery and not replayed", async () => {
   const previousHome = process.env.AUTONOMOUS_QA_HOME;
   const home = mkdtempSync(join(tmpdir(), "aqa-discover-auth-"));
   process.env.AUTONOMOUS_QA_HOME = home;
@@ -250,9 +178,8 @@ test("authProfile storage state is shared by discovery and replay", async () => 
     expect(vi.mocked(discover).mock.calls[0]?.[0]).toMatchObject({
       storageState: saved.path,
     });
-    expect(vi.mocked(startBrowser).mock.calls[0]?.[0]).toMatchObject({
-      storageState: saved.path,
-    });
+    expect(startBrowser).not.toHaveBeenCalled();
+    expect(validateFlow).not.toHaveBeenCalled();
   } finally {
     if (previousHome === undefined) {
       delete process.env.AUTONOMOUS_QA_HOME;
@@ -263,7 +190,7 @@ test("authProfile storage state is shared by discovery and replay", async () => 
   }
 });
 
-test("a disallowed start URL never launches the replay browser", async () => {
+test("a disallowed start URL never starts discovery", async () => {
   vi.mocked(discover).mockResolvedValue(clickTrajectory());
 
   const pending = discoverFlow(input("https://evil.test/secret"));

@@ -113,7 +113,7 @@ test(
 );
 
 test(
-  "a missed locator leaves the flow draft and fails the run",
+  "a click target that is gone is still saved as validated",
   async () => {
     const { client } = scriptedClient(
       pageScript(pageUrl, "Missing", "Click the missing button"),
@@ -130,14 +130,18 @@ test(
       client,
     });
 
-    expect(discovered.flow.state).toBe("draft");
-    expect(discovered.result.failure).toBeDefined();
-    expect(["failed", "error"]).toContain(discovered.result.status);
-    expect(["failed", "error"]).toContain(getRun(discovered.runId).status);
-    expect(["failed", "error"]).toContain(readRun(projectRoot, discovered.runId).status);
+    expect(discovered.flow.state).toBe("validated");
+    expect(discovered.result.failure).toBeUndefined();
+    expect(discovered.result.status).toBe("passed");
+    expect(getRun(discovered.runId).status).toBe("passed");
+    expect(readRun(projectRoot, discovered.runId).status).toBe("passed");
     const saved = read(projectRoot, "page.missing");
-    expect(saved.state).toBe("draft");
-    expect(saved.state).not.toBe("validated");
+    expect(saved.state).toBe("validated");
+    const click = saved.steps.find((step) => step.action === "click");
+    expect(click).toMatchObject({
+      action: "click",
+      locator: { type: "role", role: "button", name: "Missing" },
+    });
   },
   TEST_TIMEOUT_MS,
 );
