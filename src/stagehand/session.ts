@@ -17,9 +17,13 @@ import {
 /**
  * Injected discovery client. `close` is optional so the fake client can be
  * passed through. When present, it runs on abort and in `finally`.
+ * `resolveLocators`, when present, runs after the agent result is accepted.
  */
 export type DiscoverySessionClient = DiscoveryClient & {
   close?: () => Promise<void> | void;
+  resolveLocators?: (
+    trajectory: DiscoveryTrajectory,
+  ) => Promise<DiscoveryTrajectory>;
 };
 
 export type DiscoverOptions = {
@@ -98,17 +102,32 @@ export async function discover(
     guardStep(0, options.maxSteps, 0);
 
     const startedAt = new Date().toISOString();
+    const client = options.client;
     const work =
-      options.client === undefined
+      client === undefined
         ? runStagehand(options, resources)
-        : options.client.run(options.objective).then((result) => ({ result }));
+        : client.run(options.objective).then((result) => ({
+            result,
+            ...(client.resolveLocators === undefined
+              ? {}
+              : { resolveLocators: client.resolveLocators }),
+          }));
     const outcome = await abortable(work, signal);
     if (signal?.aborted) {
       throw cancelled();
     }
-    trajectory = acceptResult(outcome.result, options.maxSteps, startedAt);
+    const accepted = acceptResult(outcome.result, options.maxSteps, startedAt);
     if (outcome.resolveLocators !== undefined) {
-      trajectory = await outcome.resolveLocators(trajectory);
+      const resolved = await abortable(
+        outcome.resolveLocators(accepted),
+        signal,
+      );
+      if (signal?.aborted) {
+        throw cancelled();
+      }
+      trajectory = resolved;
+    } else {
+      trajectory = accepted;
     }
   } catch (error: unknown) {
     caught = true;

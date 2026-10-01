@@ -4,6 +4,7 @@ import { QaError } from "../../../src/errors/qa-error.js";
 import { createFakeClient } from "../../../src/stagehand/fake-client.js";
 import type { LlmProvider } from "../../../src/stagehand/provider.js";
 import { discover } from "../../../src/stagehand/session.js";
+import type { DiscoveryTrajectory } from "../../../src/stagehand/trajectory.js";
 
 const objective = "Archive the active project";
 const startUrl = "http://localhost:3000/projects";
@@ -157,6 +158,98 @@ test("a close failure after a discovery error keeps that error", async () => {
   expect(error.code).toBe("DISCOVERY_FAILED");
   expect(error.cause).toBe(closeError);
   expect(closed).toBe(1);
+});
+
+test("locator resolution returns the resolved trajectory", async () => {
+  const fake = createFakeClient([oneAction]);
+  const client = {
+    async run(goal: string) {
+      return fake.run(goal);
+    },
+    async resolveLocators(
+      trajectory: DiscoveryTrajectory,
+    ): Promise<DiscoveryTrajectory> {
+      return { ...trajectory, note: "resolved" };
+    },
+  };
+
+  const trajectory = await discover({
+    objective,
+    startUrl,
+    config: projectConfig(),
+    provider,
+    maxSteps: 1,
+    client,
+  });
+
+  expect(trajectory.note).toBe("resolved");
+  expect(trajectory.actions).toHaveLength(1);
+  expect(trajectory.success).toBe(true);
+});
+
+test("abort during locator resolution throws RUN_CANCELLED", async () => {
+  const controller = new AbortController();
+  let resolved = 0;
+  let closed = 0;
+  const fake = createFakeClient([oneAction]);
+  const client = {
+    async run(goal: string) {
+      return fake.run(goal);
+    },
+    async resolveLocators(
+      trajectory: DiscoveryTrajectory,
+    ): Promise<DiscoveryTrajectory> {
+      resolved += 1;
+      await Promise.resolve();
+      controller.abort();
+      await Promise.resolve();
+      return { ...trajectory, note: "resolved" };
+    },
+    async close() {
+      closed += 1;
+    },
+  };
+
+  const error = await rejected(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 5,
+      signal: controller.signal,
+      client,
+    }),
+  );
+
+  expect(error.code).toBe("RUN_CANCELLED");
+  expect(error.recoveryAppropriate).toBe(false);
+  expect(resolved).toBe(1);
+  expect(closed).toBe(1);
+});
+
+test("a locator resolution failure is not returned as a trajectory", async () => {
+  const failure = new Error("cdp connect failed");
+  const fake = createFakeClient([oneAction]);
+  const client = {
+    async run(goal: string) {
+      return fake.run(goal);
+    },
+    resolveLocators(): Promise<DiscoveryTrajectory> {
+      return Promise.reject(failure);
+    },
+  };
+
+  await expect(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 5,
+      client,
+    }),
+  ).rejects.toBe(failure);
 });
 
 test("a close failure after cancellation keeps RUN_CANCELLED", async () => {
