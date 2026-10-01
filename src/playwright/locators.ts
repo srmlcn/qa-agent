@@ -256,6 +256,7 @@ async function resolveActionLocator(
   const unique = probes
     .filter((probe) => probe.count === 1)
     .map((probe) => probe.locator);
+  const hiddenFields = new Set<FlowLocator>();
   if (isPointerAction(action)) {
     for (const locator of orderByPreference(unique)) {
       if (!(await isFormField(page, locator))) {
@@ -265,12 +266,18 @@ async function resolveActionLocator(
       if (surface !== undefined) {
         return withResolved(action, surface);
       }
+      hiddenFields.add(locator);
     }
   }
 
-  const bestUnique = orderByPreference(unique)[0];
+  const bestUnique = orderByPreference(unique).find(
+    (locator) => !hiddenFields.has(locator),
+  );
   if (bestUnique !== undefined) {
     return withResolved(action, bestUnique);
+  }
+  if (hiddenFields.size > 0) {
+    throw hiddenField(action);
   }
 
   const ambiguous = probes.filter((probe) => probe.count > 1);
@@ -340,6 +347,13 @@ function documentKey(value: string): string | undefined {
   }
   url.hash = "";
   return url.href;
+}
+
+function hiddenField(action: DiscoveryAction): QaError {
+  return new QaError({
+    code: "FLOW_COMPILE_FAILED",
+    message: `Action at index ${action.index}: hidden form field had no visible surface.`,
+  });
 }
 
 function missedLocator(action: DiscoveryAction): QaError {

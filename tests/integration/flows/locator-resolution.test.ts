@@ -297,6 +297,28 @@ test("a timer wait without a locator is not probed", async () => {
   expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
 });
 
+const duplicatePlaceholderHtml = `<!DOCTYPE html>
+<html>
+  <body>
+    <div class="ui-select-container">
+      <span class="ui-select-placeholder">Select an action</span>
+      <span class="ui-select-placeholder">Select an action</span>
+      <input id="focusser" class="ui-select-focusser"
+        style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+    </div>
+  </body>
+</html>`;
+
+test("a hidden focusser without a unique surface fails compilation", async () => {
+  await show(duplicatePlaceholderHtml);
+  const pending = resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({ selector: "//input[@id='focusser']" }),
+  ]));
+
+  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
+  await expect(pending).rejects.toThrow(/no visible surface/);
+});
+
 test("a locator that matches nothing fails closed", async () => {
   await show(hiddenSelectHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([
