@@ -227,6 +227,9 @@ async function resolveActionLocator(
   if (candidates.length === 0) {
     return action;
   }
+  if (!recordedOnThisPage(page, action)) {
+    return action;
+  }
   const probes: Probe[] = [];
   for (const candidate of candidates) {
     probes.push(await probeLocator(page, candidate));
@@ -268,6 +271,37 @@ async function resolveActionLocator(
     throw ambiguousLocator(action, sample);
   }
   return action;
+}
+
+/**
+ * An earlier page can share a selector with the final page. A match there is
+ * a different element, so it is not saved as verified. The recorded locator
+ * stays in place and replay checks it on the page that action navigates to.
+ */
+function recordedOnThisPage(page: Page, action: DiscoveryAction): boolean {
+  const recorded = documentKey(action.urlBefore) ?? documentKey(action.urlAfter);
+  if (recorded === undefined) {
+    return true;
+  }
+  const current = documentKey(page.url());
+  if (current === undefined) {
+    return true;
+  }
+  return recorded === current;
+}
+
+function documentKey(value: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return undefined;
+  }
+  url.hash = "";
+  return url.href;
 }
 
 function missedLocator(action: DiscoveryAction): QaError {

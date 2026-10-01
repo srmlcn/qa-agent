@@ -180,6 +180,35 @@ test("a blank Playwright page resolves locators on the Stagehand browser", async
   }
 });
 
+test("a locator recorded on another page is not verified against this page", async () => {
+  const served = await serveHtml(hiddenSelectHtml);
+  try {
+    await session.page.goto(served.url);
+    const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: "https://earlier.example/form",
+      }),
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: served.url,
+      }),
+    ]));
+
+    expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[1]?.resolvedLocator).toBeDefined();
+    const verified = resolved.actions[1]?.resolvedLocator;
+    if (verified === undefined) {
+      throw new Error("expected the same-page locator to be verified");
+    }
+    expect(await toLocator(session.page, verified).evaluate((element) => element.id)).toBe(
+      "visible-placeholder",
+    );
+  } finally {
+    await served.close();
+  }
+});
+
 test("a locator that matches nothing fails closed", async () => {
   await show(hiddenSelectHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([
@@ -244,14 +273,15 @@ function trajectory(actions: DiscoveryAction[]) {
 function clickAction(input: {
   selector: string;
   arguments?: unknown;
+  urlBefore?: string;
 }): DiscoveryAction {
   return {
     index: 0,
     kind: "click",
     method: "click",
     selector: input.selector,
-    urlBefore: "about:blank",
-    urlAfter: "about:blank",
+    urlBefore: input.urlBefore ?? "about:blank",
+    urlAfter: input.urlBefore ?? "about:blank",
     arguments: input.arguments ?? {},
   };
 }
