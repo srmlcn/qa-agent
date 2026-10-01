@@ -295,6 +295,7 @@ function acceptResult(
   const trajectory = fromAgentResult(result, {
     startedAt,
     endedAt: new Date().toISOString(),
+    maxSteps,
   });
   const count = trajectory.actions.length;
   if (count === 0) {

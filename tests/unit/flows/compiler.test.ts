@@ -584,6 +584,21 @@ test("focused keys type and press compile without locators", () => {
   expect(parseFlowSpec(flow)).toEqual(flow);
 });
 
+test("focused keyboard text keeps surrounding spaces", () => {
+  const flow = compile(
+    trajectory([
+      { method: "type", kind: "keys", arguments: { value: "  Ada  " } },
+      { method: "type", kind: "keys", arguments: { value: " " } },
+    ]),
+    options,
+  );
+
+  expect(flow.steps.map((step) => ("value" in step ? step.value : ""))).toEqual([
+    "  Ada  ",
+    " ",
+  ]);
+});
+
 test("a type that already has a locator still fills that locator", () => {
   const flow = compile(
     trajectory([

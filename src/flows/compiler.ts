@@ -351,7 +351,9 @@ function actionValue(
   action: DiscoveryAction,
   flowAction: FlowAction,
 ): string | undefined {
-  const fromArguments = valueFromArguments(action.arguments);
+  const fromArguments = preservesKeyboardText(action, flowAction)
+    ? verbatimFromArguments(action.arguments)
+    : valueFromArguments(action.arguments);
   if (fromArguments !== undefined) {
     return fromArguments;
   }
@@ -359,6 +361,54 @@ function actionValue(
     return nonEmptyString(action.urlAfter) ?? nonEmptyString(action.urlBefore);
   }
   return undefined;
+}
+
+/** Focused `keys` / `type` values keep surrounding spaces. */
+function preservesKeyboardText(
+  action: DiscoveryAction,
+  flowAction: FlowAction,
+): boolean {
+  if (flowAction !== "fill" && flowAction !== "press") {
+    return false;
+  }
+  const method = action.method?.trim().toLowerCase();
+  return isKeysKind(action) || method === "type";
+}
+
+function verbatimFromArguments(value: unknown): string | undefined {
+  const direct = verbatimScalar(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const scalar = verbatimScalar(item);
+      if (scalar !== undefined) {
+        return scalar;
+      }
+    }
+    return undefined;
+  }
+  if (!isPlainRecord(value)) {
+    return undefined;
+  }
+  for (const key of VALUE_KEYS) {
+    const scalar = verbatimScalar(value[key]);
+    if (scalar !== undefined) {
+      return scalar;
+    }
+  }
+  return undefined;
+}
+
+function verbatimScalar(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+  return value;
 }
 
 function valueFromArguments(value: unknown): string | undefined {

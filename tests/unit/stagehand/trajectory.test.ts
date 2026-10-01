@@ -557,6 +557,62 @@ test("an unrecognized tool fails instead of an empty trajectory", () => {
   expect(error.message).not.toContain("Discovery stopped after 0 actions");
 });
 
+test("keyboard text keeps surrounding spaces and urls stay trimmed", () => {
+  const trajectory = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "keys",
+          method: "type",
+          value: "  Ada  ",
+          times: 1,
+        },
+        {
+          type: "keys",
+          method: "type",
+          value: " ",
+          times: 1,
+        },
+        {
+          type: "goto",
+          url: "  https://app.example/invoices  ",
+        },
+      ],
+    },
+    meta,
+  );
+
+  expect(trajectory.actions[0]?.arguments).toMatchObject({ value: "  Ada  " });
+  expect(trajectory.actions[1]?.arguments).toMatchObject({ value: " " });
+  expect(trajectory.actions[2]?.arguments).toMatchObject({
+    url: "https://app.example/invoices",
+  });
+});
+
+test("a keyboard repeat above maxSteps fails before expansion", () => {
+  let error: unknown;
+  try {
+    fromAgentResult(
+      {
+        success: true,
+        actions: [{ type: "keys", method: "press", value: "Enter", repeat: 1_000_000 }],
+      },
+      { ...meta, maxSteps: 2 },
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  expect(error).toBeInstanceOf(QaError);
+  if (!(error instanceof QaError)) {
+    throw new Error("expected DISCOVERY_FAILED");
+  }
+  expect(error.code).toBe("DISCOVERY_FAILED");
+  expect(error.message).toContain("maxSteps is 2");
+  expect(error.message).not.toContain("1000000");
+});
+
 test("a message alone does not become an action", () => {
   const trajectory = fromAgentResult(
     {

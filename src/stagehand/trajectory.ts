@@ -29,6 +29,11 @@ export interface AgentResultLike {
 export interface DiscoveryTrajectoryMeta {
   startedAt: string;
   endedAt: string;
+  /**
+   * When set, keyboard `repeat` / `times` is not expanded past this budget.
+   * Expansion that would pass it throws before the repeat loop allocates.
+   */
+  maxSteps?: number;
 }
 
 export interface DiscoveryAction {
@@ -70,6 +75,14 @@ function text(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** Keyboard text is replayed verbatim, including surrounding spaces. */
+function verbatim(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+  return value;
 }
 
 function nestedArguments(
@@ -154,11 +167,16 @@ function topLevelValues(
   record: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   const extras: Record<string, unknown> = {};
-  for (const key of ["value", "text", "url"] as const) {
-    const scalar = text(record[key]);
+  const keyboard = isKeyboardPayload(record);
+  for (const key of ["value", "text"] as const) {
+    const scalar = keyboard ? verbatim(record[key]) : text(record[key]);
     if (scalar !== undefined) {
       extras[key] = scalar;
     }
+  }
+  const url = text(record.url);
+  if (url !== undefined) {
+    extras.url = url;
   }
   const times = positiveInteger(record.times);
   if (times !== undefined) {
@@ -383,18 +401,46 @@ function isFillFormSummary(record: Record<string, unknown>): boolean {
   return tool === "fillform" || tool === "fillformvision";
 }
 
+function isKeyboardPayload(record: Record<string, unknown>): boolean {
+  const method = methodText(record)?.toLowerCase();
+  const type = text(record.type)?.toLowerCase();
+  return type === "keys" || method === "press" || method === "type";
+}
+
 /**
  * `keys` repeats a focused press or type `times` times (the tool's `repeat`
  * input when the result has not yet recorded `times`).
  */
 function keyboardRepeats(record: Record<string, unknown>): number {
-  const method = methodText(record)?.toLowerCase();
-  const type = text(record.type)?.toLowerCase();
-  const keyboard = type === "keys" || method === "press" || method === "type";
-  if (!keyboard) {
+  if (!isKeyboardPayload(record)) {
     return 1;
   }
   return positiveInteger(record.times) ?? positiveInteger(record.repeat) ?? 1;
+}
+
+/** Ceiling used when a caller does not supply the run's `maxSteps`. */
+const MAX_KEYBOARD_EXPANSION = 1_000;
+
+/**
+ * Refuses a repeat that would build more actions than the run allows.
+ * The check happens before the expansion loop.
+ */
+function assertRepeatBudget(
+  repeats: number,
+  produced: number,
+  maxSteps: number | undefined,
+): void {
+  const budget = maxSteps ?? MAX_KEYBOARD_EXPANSION;
+  if (produced < budget && repeats <= budget - produced) {
+    return;
+  }
+  throw new QaError({
+    code: "DISCOVERY_FAILED",
+    message:
+      maxSteps === undefined
+        ? `Discovery recorded a keyboard repeat of ${repeats}, above the expansion bound of ${MAX_KEYBOARD_EXPANSION}.`
+        : `Discovery stopped after ${produced} actions; maxSteps is ${maxSteps}.`,
+  });
 }
 
 function positiveInteger(value: unknown): number | undefined {
@@ -512,6 +558,9 @@ export function fromAgentResult(
         continue;
       }
       const repeats = keyboardRepeats(record);
+      if (repeats > 1) {
+        assertRepeatBudget(repeats, actions.length, meta.maxSteps);
+      }
       for (let repeat = 0; repeat < repeats; repeat += 1) {
         actions.push(toDiscoveryAction(record, entries, index, actions.length));
       }

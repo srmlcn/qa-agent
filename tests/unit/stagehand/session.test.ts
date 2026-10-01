@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { ProjectConfig } from "../../../src/config/schema.js";
 import { QaError } from "../../../src/errors/qa-error.js";
-import { createFakeClient } from "../../../src/stagehand/fake-client.js";
+import { createFakeClient, type ScriptedAgentResult } from "../../../src/stagehand/fake-client.js";
 import type { LlmProvider } from "../../../src/stagehand/provider.js";
 import { discover } from "../../../src/stagehand/session.js";
 import type { DiscoveryTrajectory } from "../../../src/stagehand/trajectory.js";
@@ -77,6 +77,49 @@ test("maxSteps 1 with a script that does not finish throws DISCOVERY_FAILED", as
   expect(error.message).not.toContain(pageSecret);
   expect(JSON.stringify(error.toJSON())).not.toContain(pageSecret);
   expect(error.toJSON()).not.toHaveProperty("artifacts");
+});
+
+test("a keyboard repeat above maxSteps throws DISCOVERY_FAILED", async () => {
+  const error = await rejected(
+    discover({
+      objective,
+      startUrl,
+      config: projectConfig(),
+      provider,
+      maxSteps: 2,
+      client: {
+        async run() {
+          return {
+            success: true,
+            completed: true,
+            message: objective,
+            actions: [
+              {
+                type: "keys",
+                method: "press",
+                selector: "",
+                description: "press enter",
+                instruction: "press enter",
+                action: "press enter",
+                value: "Enter",
+                repeat: 1_000_000,
+                arguments: [],
+                playwrightArguments: {
+                  method: "press",
+                  selector: "",
+                  description: "press enter",
+                  arguments: [],
+                },
+              },
+            ],
+          } as ScriptedAgentResult;
+        },
+      },
+    }),
+  );
+
+  expect(error.code).toBe("DISCOVERY_FAILED");
+  expect(error.message).toContain("maxSteps is 2");
 });
 
 test("an empty trajectory throws DISCOVERY_FAILED", async () => {
