@@ -45,7 +45,7 @@ test("first run creates config and flows directory", async () => {
   const yaml = await readFile(configPath, "utf8");
   expect(yaml).toContain("recoveryEnabled: true");
   expect(yaml).toContain("workers: 4");
-  expect(yaml).toContain("timeoutMs: 30000");
+  expect(yaml).toContain("timeoutMs: 60000");
   expect(loadProjectConfig(root)).toEqual({
     version: 1,
     project: { id: "widget-factory" },
@@ -71,7 +71,7 @@ test("first run creates config and flows directory", async () => {
       browser: "chromium",
       headless: true,
       workers: 4,
-      timeoutMs: 30000,
+      timeoutMs: 60000,
     },
     evidence: {
       screenshots: "checkpoints",
