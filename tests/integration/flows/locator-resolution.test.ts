@@ -317,8 +317,29 @@ const looseInputHtml = `<!DOCTYPE html>
   </body>
 </html>`;
 
+const widgetClearHtml = `<!DOCTYPE html>
+<html>
+  <body>
+    <div class="ui-select-container">
+      <div id="combo" role="combobox">Pick</div>
+      <button id="clear" role="button" aria-label="Clear">Clear</button>
+      <input id="focusser" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+    </div>
+  </body>
+</html>`;
+
 test("a hidden input outside a widget is not retargeted to a page button", async () => {
   await show(looseInputHtml);
+  const pending = resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({ selector: "//input[@id='focusser']" }),
+  ]));
+
+  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
+  await expect(pending).rejects.toThrow(/no visible surface/);
+});
+
+test("a widget clear button is not the hidden field surface", async () => {
+  await show(widgetClearHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([
     clickAction({ selector: "//input[@id='focusser']" }),
   ]));

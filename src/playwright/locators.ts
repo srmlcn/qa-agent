@@ -594,8 +594,6 @@ function describeVisibleSurface(element: Element): SurfaceDescription | null {
     ".ui-select-placeholder",
     ".ui-select-toggle",
     ".ui-select-match",
-    "[role='combobox']",
-    "[role='button']",
   ];
   for (const selector of selectors) {
     for (const node of root.querySelectorAll(selector)) {
