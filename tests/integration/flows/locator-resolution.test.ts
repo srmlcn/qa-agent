@@ -180,6 +180,38 @@ test("a blank Playwright page resolves locators on the Stagehand browser", async
   }
 });
 
+test("a locator that matches nothing fails closed", async () => {
+  await show(hiddenSelectHtml);
+  const pending = resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({ selector: "#missing" }),
+  ]));
+
+  await expect(pending).rejects.toBeInstanceOf(QaError);
+  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
+  await expect(pending).rejects.toThrow(/matched no elements/);
+});
+
+test("a hidden focusser is not retargeted for fill", async () => {
+  await show(hiddenSelectHtml);
+  const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+    {
+      index: 0,
+      kind: "fill",
+      method: "fill",
+      selector: "//input[@id='focusser']",
+      urlBefore: "about:blank",
+      urlAfter: "about:blank",
+      arguments: { value: "Ada" },
+    },
+  ]));
+  const flow = compile(resolved, compileOptions);
+  const step = flow.steps[0];
+  if (step?.action !== "fill") {
+    throw new Error("expected a fill");
+  }
+  expect(await elementId(step.locator)).toBe("focusser");
+});
+
 test("an irrecoverable duplicate text locator fails compilation", async () => {
   await show(duplicateTextHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([

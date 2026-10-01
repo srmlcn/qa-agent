@@ -187,19 +187,33 @@ export async function resolveDiscoveryLocators(
     return resolveTrajectoryLocators(localPage, trajectory);
   }
   if (connectUrl === undefined) {
-    return trajectory;
+    return unchecked(trajectory);
   }
   const connected = await chromium.connectOverCDP(connectUrl);
   try {
     const pages = connected.contexts().flatMap((context) => context.pages());
     const active = [...pages].reverse().find((page) => page.url() !== "about:blank");
     if (active === undefined) {
-      return trajectory;
+      return unchecked(trajectory);
     }
     return await resolveTrajectoryLocators(active, trajectory);
   } finally {
     await connected.close().catch(() => undefined);
   }
+}
+
+/**
+ * A candidate that cannot be checked on a live page is not treated as valid.
+ * `discoverFlow` would otherwise compile it and save the draft after replay fails.
+ */
+function unchecked(trajectory: DiscoveryTrajectory): DiscoveryTrajectory {
+  for (const action of trajectory.actions) {
+    if (!needsLocatorCheck(action) || locatorCandidates(action).length === 0) {
+      continue;
+    }
+    throw missedLocator(action);
+  }
+  return trajectory;
 }
 
 async function resolveActionLocator(
@@ -218,7 +232,7 @@ async function resolveActionLocator(
     probes.push(await probeLocator(page, candidate));
   }
   if (probes.every((probe) => probe.count === 0)) {
-    return action;
+    throw missedLocator(action);
   }
 
   const interactable = probes
@@ -231,13 +245,15 @@ async function resolveActionLocator(
   const unique = probes
     .filter((probe) => probe.count === 1)
     .map((probe) => probe.locator);
-  for (const locator of orderByPreference(unique)) {
-    if (!(await isFormField(page, locator))) {
-      continue;
-    }
-    const surface = await visibleSurface(page, locator);
-    if (surface !== undefined) {
-      return withResolved(action, surface);
+  if (isPointerAction(action)) {
+    for (const locator of orderByPreference(unique)) {
+      if (!(await isFormField(page, locator))) {
+        continue;
+      }
+      const surface = await visibleSurface(page, locator);
+      if (surface !== undefined) {
+        return withResolved(action, surface);
+      }
     }
   }
 
@@ -252,6 +268,23 @@ async function resolveActionLocator(
     throw ambiguousLocator(action, sample);
   }
   return action;
+}
+
+function missedLocator(action: DiscoveryAction): QaError {
+  return new QaError({
+    code: "FLOW_COMPILE_FAILED",
+    message: `Action at index ${action.index}: locator candidates matched no elements.`,
+  });
+}
+
+function isPointerAction(action: DiscoveryAction): boolean {
+  const token = (action.method ?? action.kind).trim().toLowerCase();
+  return (
+    token === "click" ||
+    token === "hover" ||
+    token === "check" ||
+    token === "uncheck"
+  );
 }
 
 function ambiguousLocator(action: DiscoveryAction, locator: FlowLocator): QaError {
