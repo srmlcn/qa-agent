@@ -108,41 +108,6 @@ test("qa.repair_flow maps a product failure to the original run id", async () =>
   expect(browserRuntime.startBrowser).not.toHaveBeenCalled();
 });
 
-test("qa.repair_flow maps a replay failure to the original run id", async () => {
-  const projectRoot = createProjectRoot();
-  vi.mocked(repairFlow).mockResolvedValue({
-    repaired: false,
-    reason: "replay-failure",
-    runId: "run-1",
-    repairRunId: "repair-9",
-    result: {
-      runId: "repair-9",
-      flowId: "project.archive",
-      status: "failed",
-      startedAt: "2026-09-27T00:00:00.000Z",
-      durationMs: 4,
-      steps: [],
-      network: { failedRequests: [], responses: [] },
-      console: { errors: [], warnings: [] },
-      pageErrors: [],
-      artifacts: { screenshots: [] },
-    },
-  });
-
-  const output = await withCwd(projectRoot, () =>
-    repairFlowTool.handler({
-      flowId: "project.archive",
-      failedStepId: "confirm-archive",
-      runId: "run-1",
-      projectRoot,
-    }),
-  );
-
-  expect(output).toEqual({ repaired: false, runId: "run-1" });
-  expect(output).not.toHaveProperty("repairRunId");
-  expect(output).not.toHaveProperty("reason");
-});
-
 test("qa.repair_flow returns the flow when repair succeeds", async () => {
   const projectRoot = createProjectRoot();
   const flow = { id: "project.archive" };

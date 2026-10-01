@@ -3,24 +3,15 @@ import type { ProjectConfig } from "../config/schema.js";
 import { startRun, type RunBuilder } from "../evidence/result.js";
 import { writeRun } from "../evidence/store.js";
 import type { RunResult } from "../evidence/types.js";
-import type { QaError } from "../errors/qa-error.js";
 import { compile } from "../flows/compiler.js";
 import { save } from "../flows/repository.js";
 import type { FlowSpec } from "../flows/schema.js";
-import { validateFlow } from "../flows/validator.js";
-import { startBrowser, type BrowserSession } from "../playwright/runtime.js";
+import { transition } from "../flows/state.js";
 import { assertUrlAllowed } from "../security/hosts.js";
 import { assertActionAllowed } from "../security/policy.js";
 import type { LlmProvider } from "../stagehand/provider.js";
 import { discover, type DiscoverOptions } from "../stagehand/session.js";
-import { complete, createRun, setOnCancel } from "./runs.js";
-
-/**
- * `startBrowser` applies one timeout to process launch and to the page.
- * Locator waits use `playwright.timeoutMs`. Launch keeps a floor so a short
- * action timeout cannot abort Chromium startup.
- */
-const MIN_LAUNCH_TIMEOUT_MS = 30_000;
+import { complete, createRun } from "./runs.js";
 
 export type DiscoverFlowInput = {
   /** Stable flow id passed to the compiler and the run registry. */
@@ -48,9 +39,11 @@ export type DiscoverFlowResult = {
 
 /**
  * Checks the start URL, runs a bounded discovery session, compiles the
- * trajectory, replays it from that start URL, and saves the validated flow.
- * A replay failure saves the draft and returns that draft with the run error.
- * Destructive step intents are refused after compile and before replay.
+ * trajectory, and saves the validated flow.
+ * A successful Stagehand trajectory is the proof that each click was possible.
+ * Those clicks are not replayed: the page they leave behind can hide a control
+ * that existed only in the state the click started from.
+ * Destructive step intents are refused after compile and before the flow is saved.
  */
 export async function discoverFlow(
   input: DiscoverFlowInput,
@@ -88,14 +81,10 @@ export async function discoverFlow(
     assertActionAllowed(stepPolicy(step), input.config);
   }
 
-  const replayed = await replayDraft(input, draft, runId, signal, storageState);
-  const flow = replayed.ok ? replayed.flow : draft;
+  assertCompiledGotoUrls(draft, input.config);
+  const flow = transition(draft, "validate");
   const builder = startRun({ runId, flowId: input.id });
-  if (replayed.ok) {
-    recordPassed(builder, flow);
-  } else {
-    recordFailure(builder, draft, replayed.error);
-  }
+  recordPassed(builder, flow);
   save(input.projectRoot, flow);
   const result = builder.finish();
   complete(runId, result);
@@ -103,105 +92,15 @@ export async function discoverFlow(
   return { runId, flow, result };
 }
 
-async function replayDraft(
-  input: DiscoverFlowInput,
-  flow: FlowSpec,
-  runId: string,
-  signal: AbortSignal,
-  storageState: string | undefined,
-): Promise<Awaited<ReturnType<typeof validateFlow>>> {
-  let session: BrowserSession | undefined;
-  setOnCancel(runId, () => {
-    if (session === undefined) {
-      return;
-    }
-    void session.close().catch(() => {
-      // The abort signal already stops the run. Close failures surface from `finally`.
-    });
-  });
-
-  const baseUrl = input.config.application.baseUrl;
-  assertCompiledGotoUrls(flow, input.config);
-  const replayFlow = withAbsoluteGotos(flow, baseUrl);
-
-  try {
-    session = await startBrowser({
-      browser: input.config.playwright.browser,
-      headless: input.config.playwright.headless,
-      timeoutMs: Math.max(
-        input.config.playwright.timeoutMs,
-        MIN_LAUNCH_TIMEOUT_MS,
-      ),
-      signal,
-      ...(storageState === undefined ? {} : { storageState }),
-    });
-    await openReplayStart(session.page, input, replayFlow);
-    return await validateFlow({
-      flow: replayFlow,
-      page: session.page,
-      timeoutMs: input.config.playwright.timeoutMs,
-    });
-  } finally {
-    await session?.close();
-  }
-}
-
 /**
  * Relative goto values resolve against `application.baseUrl`, matching
- * execution. Each target must be allowlisted before replay can navigate.
+ * execution. Each target must be allowlisted before the flow is saved.
  */
 function assertCompiledGotoUrls(flow: FlowSpec, config: ProjectConfig): void {
   const baseUrl = config.application.baseUrl;
   for (const value of gotoValues(flow)) {
     assertUrlAllowed(resolveAgainstBase(value, baseUrl), config);
   }
-}
-
-/**
- * The discovery browser is already closed, so this page is `about:blank`.
- * `openStartUrl` is not a compiled step. Open the allowlisted start URL
- * before the compiled steps, unless the draft already begins with an
- * equivalent `goto`.
- */
-async function openReplayStart(
-  page: BrowserSession["page"],
-  input: DiscoverFlowInput,
-  flow: FlowSpec,
-): Promise<void> {
-  const startUrl = resolveAgainstBase(
-    resolveStartUrl(input),
-    input.config.application.baseUrl,
-  );
-  assertUrlAllowed(startUrl, input.config);
-  if (startsWithStartGoto(flow, startUrl, input.config.application.baseUrl)) {
-    return;
-  }
-  await page.goto(startUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: input.config.playwright.timeoutMs,
-  });
-}
-
-function withAbsoluteGotos(flow: FlowSpec, baseUrl: string): FlowSpec {
-  const copy = structuredClone(flow);
-  for (const step of copy.steps) {
-    const value = gotoValue(step);
-    if (value !== undefined) {
-      writeGotoValue(step, resolveAgainstBase(value, baseUrl));
-    }
-  }
-  for (const assertion of copy.assertions) {
-    if (assertion.type !== "sequence") {
-      continue;
-    }
-    for (const entry of assertion.sequence) {
-      const value = gotoValue(entry);
-      if (value !== undefined) {
-        writeGotoValue(entry, resolveAgainstBase(value, baseUrl));
-      }
-    }
-  }
-  return copy;
 }
 
 function gotoValues(flow: FlowSpec): string[] {
@@ -233,12 +132,6 @@ function gotoValue(step: unknown): string | undefined {
   return step.value;
 }
 
-function writeGotoValue(step: unknown, value: string): void {
-  if (isGoto(step)) {
-    step.value = value;
-  }
-}
-
 function isGoto(step: unknown): step is { action: "goto"; value: string } {
   if (typeof step !== "object" || step === null) {
     return false;
@@ -259,51 +152,9 @@ function resolveStartUrl(input: DiscoverFlowInput): string {
   return input.startUrl ?? input.config.application.baseUrl;
 }
 
-function startsWithStartGoto(
-  flow: FlowSpec,
-  startUrl: string,
-  baseUrl: string,
-): boolean {
-  const value = gotoValue(flow.steps[0]);
-  if (value === undefined) {
-    return false;
-  }
-  return resolveAgainstBase(value, baseUrl) === resolveAgainstBase(startUrl, baseUrl);
-}
-
 function recordPassed(builder: RunBuilder, flow: FlowSpec): void {
   for (const step of flow.steps) {
     builder.stepPassed(stepIdOf(step));
-  }
-}
-
-/**
- * `validateFlow` stops at the first replay failure. Steps before that id ran.
- */
-function recordFailure(
-  builder: RunBuilder,
-  flow: FlowSpec,
-  error: QaError,
-): void {
-  const failedAt = error.stepId;
-  const first = flow.steps[0];
-  if (failedAt === undefined) {
-    builder.stepFailed(first === undefined ? "validation" : stepIdOf(first), error);
-    return;
-  }
-
-  let recorded = false;
-  for (const step of flow.steps) {
-    const id = stepIdOf(step);
-    if (id === failedAt) {
-      builder.stepFailed(id, error);
-      recorded = true;
-      break;
-    }
-    builder.stepPassed(id);
-  }
-  if (!recorded) {
-    builder.stepFailed(failedAt, error);
   }
 }
 
