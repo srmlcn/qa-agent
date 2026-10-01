@@ -157,7 +157,9 @@ type SurfaceDescription = {
 };
 
 /**
- * Checks interaction locators on `page` before they are compiled.
+ * Checks interaction locators that are still on `page` before they are compiled.
+ * A control that matches nothing is left recorded. The action already ran, and
+ * the page may no longer be in the state that showed that control.
  * A hidden field is not kept when a visible control for the same widget
  * is on the page. `nth` is not used: row order is not a stable identity.
  * A locator that still matches multiple elements fails compilation.
@@ -181,9 +183,11 @@ export async function resolveTrajectoryLocators(
 }
 
 /**
- * Checks locators on the page discovery actually drove.
+ * Checks locators that are still on the page discovery drove.
  * The Playwright page Stagehand did not navigate stays on `about:blank`.
  * In that case the Stagehand browser is attached through its CDP websocket.
+ * When that browser cannot be attached, the recorded locators are kept.
+ * Stagehand already performed the actions.
  */
 export async function resolveDiscoveryLocators(
   localPage: Page,
@@ -194,33 +198,19 @@ export async function resolveDiscoveryLocators(
     return resolveTrajectoryLocators(localPage, trajectory);
   }
   if (connectUrl === undefined) {
-    return unchecked(trajectory);
+    return trajectory;
   }
   const connected = await chromium.connectOverCDP(connectUrl);
   try {
     const pages = connected.contexts().flatMap((context) => context.pages());
     const active = [...pages].reverse().find((page) => page.url() !== "about:blank");
     if (active === undefined) {
-      return unchecked(trajectory);
+      return trajectory;
     }
     return await resolveTrajectoryLocators(active, trajectory);
   } finally {
     await connected.close().catch(() => undefined);
   }
-}
-
-/**
- * A candidate that cannot be checked on a live page is not treated as valid.
- * `discoverFlow` would otherwise compile it and save the draft after replay fails.
- */
-function unchecked(trajectory: DiscoveryTrajectory): DiscoveryTrajectory {
-  for (const action of trajectory.actions) {
-    if (!needsLocatorCheck(action) || locatorCandidates(action).length === 0) {
-      continue;
-    }
-    throw missedLocator(action);
-  }
-  return trajectory;
 }
 
 async function resolveActionLocator(
@@ -243,7 +233,7 @@ async function resolveActionLocator(
     probes.push(await probeLocator(page, candidate));
   }
   if (probes.every((probe) => probe.count === 0)) {
-    throw missedLocator(action);
+    return action;
   }
 
   const interactable = probes
@@ -366,13 +356,6 @@ function hiddenField(action: DiscoveryAction): QaError {
   return new QaError({
     code: "FLOW_COMPILE_FAILED",
     message: `Action at index ${action.index}: hidden form field had no visible surface.`,
-  });
-}
-
-function missedLocator(action: DiscoveryAction): QaError {
-  return new QaError({
-    code: "FLOW_COMPILE_FAILED",
-    message: `Action at index ${action.index}: locator candidates matched no elements.`,
   });
 }
 

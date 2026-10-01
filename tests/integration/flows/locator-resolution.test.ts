@@ -263,9 +263,9 @@ test("a locator without a recorded page is not verified against the final page",
   }
 });
 
-test("a locator-backed wait that matches nothing fails closed", async () => {
+test("a locator-backed wait whose target is gone stays recorded", async () => {
   await show(hiddenSelectHtml);
-  const pending = resolveTrajectoryLocators(session.page, trajectory([
+  const resolved = await resolveTrajectoryLocators(session.page, trajectory([
     {
       index: 0,
       kind: "wait",
@@ -277,8 +277,7 @@ test("a locator-backed wait that matches nothing fails closed", async () => {
     },
   ]));
 
-  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
-  await expect(pending).rejects.toThrow(/matched no elements/);
+  expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
 });
 
 test("a timer wait without a locator is not probed", async () => {
@@ -388,15 +387,49 @@ test("a hidden focusser without a unique surface fails compilation", async () =>
   await expect(pending).rejects.toThrow(/no visible surface/);
 });
 
-test("a locator that matches nothing fails closed", async () => {
+test("a click whose target is gone stays recorded", async () => {
   await show(hiddenSelectHtml);
-  const pending = resolveTrajectoryLocators(session.page, trajectory([
+  const resolved = await resolveTrajectoryLocators(session.page, trajectory([
     clickAction({ selector: "#missing" }),
   ]));
 
-  await expect(pending).rejects.toBeInstanceOf(QaError);
-  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
-  await expect(pending).rejects.toThrow(/matched no elements/);
+  expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+  const flow = compile(resolved, compileOptions);
+  const step = flow.steps[0];
+  if (step?.action !== "click") {
+    throw new Error("expected a click");
+  }
+  expect(step.locator).toEqual({ type: "css", selector: "#missing" });
+});
+
+test("an edit control removed after the click is not required on the final page", async () => {
+  await show(`<!DOCTYPE html>
+<html>
+  <body>
+    <button id="edit" type="button">Edit</button>
+  </body>
+</html>`);
+  await session.page.setContent(`<!DOCTYPE html>
+<html>
+  <body>
+    <p id="paid">Paid</p>
+  </body>
+</html>`);
+
+  const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+    clickAction({
+      selector: 'role=button[name="Edit"]',
+      arguments: { role: "button", name: "Edit" },
+    }),
+  ]));
+
+  expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+  const flow = compile(resolved, compileOptions);
+  const step = flow.steps[0];
+  if (step?.action !== "click") {
+    throw new Error("expected a click");
+  }
+  expect(step.locator).toEqual({ type: "role", role: "button", name: "Edit" });
 });
 
 test("a hidden focusser is not retargeted for fill", async () => {
