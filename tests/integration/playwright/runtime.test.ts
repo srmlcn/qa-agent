@@ -92,6 +92,9 @@ test("the runtime module does not import Stagehand or an LLM client", () => {
   expect(source).not.toContain("import(");
   expect(importSpecifiers(source).sort()).toEqual([
     "../errors/qa-error.js",
+    "../runtime/paths.js",
+    "node:fs",
+    "node:net",
     "playwright",
   ]);
 });
@@ -173,6 +176,35 @@ test(
     controller.abort();
     await expect(pending).rejects.toMatchObject({ code: "RUN_CANCELLED" });
     await expect.poll(() => extraPids(before), { timeout: 10_000 }).toEqual([]);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "remote debugging publishes the loopback websocket URL",
+  async () => {
+    const session = await startBrowser({
+      headless: true,
+      timeoutMs: LAUNCH_TIMEOUT_MS,
+      remoteDebugging: true,
+    });
+    try {
+      const cdpUrl = session.cdpUrl;
+      expect(cdpUrl).toEqual(expect.any(String));
+      if (cdpUrl === undefined) {
+        return;
+      }
+      const parsed = new URL(cdpUrl);
+      expect(parsed.protocol).toBe("ws:");
+      expect(parsed.hostname).toBe("127.0.0.1");
+      const version = await fetch(`http://127.0.0.1:${parsed.port}/json/version`);
+      expect(version.ok).toBe(true);
+      const body = (await version.json()) as { webSocketDebuggerUrl?: string };
+      expect(body.webSocketDebuggerUrl).toBe(cdpUrl);
+    } finally {
+      await session.close();
+    }
+    expect(session.browser.isConnected()).toBe(false);
   },
   TEST_TIMEOUT_MS,
 );
