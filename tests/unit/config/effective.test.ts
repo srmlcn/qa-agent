@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { builtinProjectDocument } from "../../../src/config/defaults.js";
 import { loadEffectiveConfig } from "../../../src/config/effective.js";
 import { projectConfigPath } from "../../../src/config/load-project.js";
 import { QaError } from "../../../src/errors/qa-error.js";
@@ -400,6 +401,42 @@ test("a repo header map replaces the user header map", () => {
   const result = loadEffectiveConfig(writeProjectConfig(FULL_PROJECT));
 
   expect(result.config.llm.headers).toEqual({ "X-Project": "project" });
+});
+
+test("the builtin playwright timeout is 60 seconds unless the project sets timeoutMs", () => {
+  expect(builtinProjectDocument("demo-app").playwright).toMatchObject({
+    timeoutMs: 60_000,
+  });
+
+  writeUserConfig({ llm: USER_LLM });
+  const omitted = `
+version: 1
+project:
+  id: demo-app
+application:
+  baseUrl: http://localhost:3000
+  allowedHosts:
+    - localhost
+playwright:
+  workers: 2
+`;
+  const omittedResult = loadEffectiveConfig(writeProjectConfig(omitted));
+  expect(omittedResult.config.playwright.timeoutMs).toBe(60_000);
+  expect(omittedResult.config.playwright.workers).toBe(2);
+
+  const explicit = `
+version: 1
+project:
+  id: demo-app
+application:
+  baseUrl: http://localhost:3000
+  allowedHosts:
+    - localhost
+playwright:
+  timeoutMs: 45000
+`;
+  const explicitResult = loadEffectiveConfig(writeProjectConfig(explicit));
+  expect(explicitResult.config.playwright.timeoutMs).toBe(45_000);
 });
 
 test("incomplete global llm settings name the user config", () => {
