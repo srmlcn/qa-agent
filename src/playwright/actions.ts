@@ -13,8 +13,8 @@ type RunnableStep =
   | { id: string; action: "reload" }
   | { id: string; action: "click"; locator: FlowLocator }
   | { id: string; action: "hover"; locator: FlowLocator }
-  | { id: string; action: "fill"; locator: FlowLocator; value: string }
-  | { id: string; action: "press"; locator: FlowLocator; value: string }
+  | { id: string; action: "fill"; locator?: FlowLocator; value: string }
+  | { id: string; action: "press"; locator?: FlowLocator; value: string }
   | { id: string; action: "select"; locator: FlowLocator; value: string }
   | { id: string; action: "check"; locator: FlowLocator }
   | { id: string; action: "uncheck"; locator: FlowLocator }
@@ -75,11 +75,19 @@ async function performAction(
       await toLocator(page, step.locator).hover({ timeout: timeoutMs });
       return;
     case "fill":
+      if (step.locator === undefined) {
+        await page.keyboard.type(step.value);
+        return;
+      }
       await toLocator(page, step.locator).fill(step.value, {
         timeout: timeoutMs,
       });
       return;
     case "press":
+      if (step.locator === undefined) {
+        await page.keyboard.press(step.value);
+        return;
+      }
       await toLocator(page, step.locator).press(step.value, {
         timeout: timeoutMs,
       });

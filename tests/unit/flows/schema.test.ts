@@ -119,6 +119,30 @@ test("rejects a click without a locator", () => {
   ).toThrow();
 });
 
+test("allows a focused fill and press without a locator", () => {
+  const flow = parseFlowSpec(
+    flowWithSteps([
+      {
+        id: "type-name",
+        intent: "Type the name",
+        action: "fill",
+        value: "Ada",
+      },
+      {
+        id: "press-enter",
+        intent: "Press Enter",
+        action: "press",
+        value: "Enter",
+      },
+    ]),
+  );
+
+  expect(flow.steps[0]).toMatchObject({ action: "fill", value: "Ada" });
+  expect(flow.steps[0]).not.toHaveProperty("locator");
+  expect(flow.steps[1]).toMatchObject({ action: "press", value: "Enter" });
+  expect(flow.steps[1]).not.toHaveProperty("locator");
+});
+
 test("rejects a css locator without selector", () => {
   expect(() =>
     parseFlowSpec(

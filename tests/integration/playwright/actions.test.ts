@@ -332,6 +332,42 @@ test("a fallback string is ignored and the locator is used", async () => {
   expect(await clickedId()).toBe("save");
 });
 
+test("locator-less fill and press use the keyboard on the focused element", async () => {
+  await showForm();
+  await session.page.locator("#name").focus();
+  await session.page.evaluate(() => {
+    document.addEventListener("keydown", (event) => {
+      const log = document.body.dataset.keys ?? "";
+      document.body.dataset.keys = `${log}${event.key},`;
+    });
+  });
+
+  await runAction(
+    session.page,
+    {
+      id: "type-name",
+      intent: "Type the name",
+      action: "fill",
+      value: "Ada",
+    },
+    ACTION_TIMEOUT_MS,
+  );
+  expect(await session.page.locator("#name").inputValue()).toBe("Ada");
+
+  await runAction(
+    session.page,
+    {
+      id: "press-enter",
+      intent: "Press Enter",
+      action: "press",
+      value: "Enter",
+    },
+    ACTION_TIMEOUT_MS,
+  );
+  const keys = await session.page.evaluate(() => document.body.dataset.keys);
+  expect(keys).toContain("Enter");
+});
+
 test("the action module has no fallback reader and no network client", () => {
   const sourcePath = fileURLToPath(
     new URL("../../../src/playwright/actions.ts", import.meta.url),

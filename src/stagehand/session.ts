@@ -2,7 +2,9 @@ import type { ProjectConfig } from "../config/schema.js";
 import { QaError } from "../errors/qa-error.js";
 import { assertUrlAllowed } from "../security/hosts.js";
 import { assertStepsRemaining } from "../security/policy.js";
-import { startBrowser } from "../playwright/runtime.js";
+import type { Page } from "playwright";
+import { resolveDiscoveryLocators } from "../playwright/locators.js";
+import { startBrowser, type BrowserSession } from "../playwright/runtime.js";
 import type { DiscoveryClient } from "./fake-client.js";
 import { createStagehand, requireApiKey } from "./llm-client.js";
 import type { LlmProvider } from "./provider.js";
@@ -15,9 +17,13 @@ import {
 /**
  * Injected discovery client. `close` is optional so the fake client can be
  * passed through. When present, it runs on abort and in `finally`.
+ * `resolveLocators`, when present, runs after the agent result is accepted.
  */
 export type DiscoverySessionClient = DiscoveryClient & {
   close?: () => Promise<void> | void;
+  resolveLocators?: (
+    trajectory: DiscoveryTrajectory,
+  ) => Promise<DiscoveryTrajectory>;
 };
 
 export type DiscoverOptions = {
@@ -101,15 +107,33 @@ export async function discover(
     guardStep(0, options.maxSteps, 0);
 
     const startedAt = new Date().toISOString();
+    const client = options.client;
     const work =
-      options.client === undefined
+      client === undefined
         ? runStagehand(options, resources)
-        : options.client.run(options.objective);
-    const result = await abortable(work, signal);
+        : client.run(options.objective).then((result) => ({
+            result,
+            ...(client.resolveLocators === undefined
+              ? {}
+              : { resolveLocators: client.resolveLocators }),
+          }));
+    const outcome = await abortable(work, signal);
     if (signal?.aborted) {
       throw cancelled();
     }
-    trajectory = acceptResult(result, options.maxSteps, startedAt);
+    const accepted = acceptResult(outcome.result, options.maxSteps, startedAt);
+    if (outcome.resolveLocators !== undefined) {
+      const resolved = await abortable(
+        outcome.resolveLocators(accepted),
+        signal,
+      );
+      if (signal?.aborted) {
+        throw cancelled();
+      }
+      trajectory = resolved;
+    } else {
+      trajectory = accepted;
+    }
   } catch (error: unknown) {
     caught = true;
     primaryError = error;
@@ -144,10 +168,17 @@ async function closeAfter(
   }
 }
 
+type StagehandRun = {
+  result: AgentResultLike;
+  resolveLocators?: (
+    trajectory: DiscoveryTrajectory,
+  ) => Promise<DiscoveryTrajectory>;
+};
+
 async function runStagehand(
   options: DiscoverOptions,
   resources: SessionResources,
-): Promise<AgentResultLike> {
+): Promise<StagehandRun> {
   const signal = options.signal;
   if (signal?.aborted) {
     throw cancelled();
@@ -204,11 +235,47 @@ async function runStagehand(
     ...(signal === undefined ? {} : { signal }),
   });
   return {
-    success: executed.success,
-    message: executed.message,
-    actions: executed.actions,
-    completed: executed.completed,
+    result: {
+      success: executed.success,
+      message: executed.message,
+      actions: executed.actions,
+      completed: executed.completed,
+    },
+    resolveLocators: (trajectory) =>
+      resolveDiscoveryLocators(
+        discoveryPage(browserSession),
+        trajectory,
+        connectUrl(stagehand),
+      ),
   };
+}
+
+function connectUrl(stagehand: { connectURL?: () => string }): string | undefined {
+  if (typeof stagehand.connectURL !== "function") {
+    return undefined;
+  }
+  try {
+    const url = stagehand.connectURL();
+    if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+      return undefined;
+    }
+    return url;
+  } catch {
+    return undefined;
+  }
+}
+
+function discoveryPage(session: BrowserSession): Page {
+  const pages = session.browser
+    .contexts()
+    .flatMap((context) => context.pages());
+  for (let index = pages.length - 1; index >= 0; index -= 1) {
+    const candidate = pages[index];
+    if (candidate !== undefined && candidate.url() !== "about:blank") {
+      return candidate;
+    }
+  }
+  return session.page;
 }
 
 async function openStartUrl(
@@ -244,6 +311,7 @@ function acceptResult(
   const trajectory = fromAgentResult(result, {
     startedAt,
     endedAt: new Date().toISOString(),
+    maxSteps,
   });
   const count = trajectory.actions.length;
   if (count === 0) {

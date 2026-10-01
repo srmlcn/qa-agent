@@ -104,12 +104,12 @@ function actionSchemas(identity: z.ZodRawShape) {
     actionSchema("hover", { locator: locatorSchema }, identity),
     actionSchema(
       "fill",
-      { locator: locatorSchema, value: z.string() },
+      { locator: locatorSchema.optional(), value: z.string() },
       identity,
     ),
     actionSchema(
       "press",
-      { locator: locatorSchema, value: z.string() },
+      { locator: locatorSchema.optional(), value: z.string() },
       identity,
     ),
     actionSchema(

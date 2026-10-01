@@ -2,9 +2,10 @@ import { expect, test } from "vitest";
 import { QaError } from "../../../src/errors/qa-error.js";
 import { compile } from "../../../src/flows/compiler.js";
 import { parseFlowSpec, type Locator } from "../../../src/flows/schema.js";
-import type {
-  DiscoveryAction,
-  DiscoveryTrajectory,
+import {
+  fromAgentResult,
+  type DiscoveryAction,
+  type DiscoveryTrajectory,
 } from "../../../src/stagehand/trajectory.js";
 
 const startedAt = "2026-09-26T19:00:00.000Z";
@@ -537,4 +538,140 @@ test("omits authProfile when the caller does not provide one", () => {
 
   expect(flow.authProfile).toBeUndefined();
   expect(flow.state).toBe("draft");
+});
+
+test("focused keys type and press compile without locators", () => {
+  const discovered = fromAgentResult(
+    {
+      success: true,
+      actions: [
+        {
+          type: "keys",
+          method: "type",
+          value: "Ada",
+          times: 1,
+          success: true,
+          taskCompleted: false,
+        },
+        {
+          type: "keys",
+          method: "press",
+          value: "Tab",
+          times: 2,
+          success: true,
+          taskCompleted: false,
+        },
+      ],
+    },
+    { startedAt, endedAt },
+  );
+  const flow = compile(discovered, options);
+
+  expect(flow.steps.map((step) => step.action)).toEqual([
+    "fill",
+    "press",
+    "press",
+  ]);
+  expect(flow.steps.map((step) => ("value" in step ? step.value : ""))).toEqual([
+    "Ada",
+    "Tab",
+    "Tab",
+  ]);
+  for (const step of flow.steps) {
+    expect(step).not.toHaveProperty("locator");
+  }
+  expect(flow.steps[1]).toMatchObject({ intent: "Press Tab" });
+  expect(parseFlowSpec(flow)).toEqual(flow);
+});
+
+test("focused keyboard text keeps surrounding spaces", () => {
+  const flow = compile(
+    trajectory([
+      { method: "type", kind: "keys", arguments: { value: "  Ada  " } },
+      { method: "type", kind: "keys", arguments: { value: " " } },
+    ]),
+    options,
+  );
+
+  expect(flow.steps.map((step) => ("value" in step ? step.value : ""))).toEqual([
+    "  Ada  ",
+    " ",
+  ]);
+});
+
+test("a type that already has a locator still fills that locator", () => {
+  const flow = compile(
+    trajectory([
+      { method: "type", selector: "#name", arguments: ["Ada"] },
+    ]),
+    options,
+  );
+
+  expect(flow.steps[0]).toMatchObject({
+    action: "fill",
+    value: "Ada",
+    locator: { type: "css", selector: "#name" },
+  });
+});
+
+test("a locator fill without a locator throws FLOW_COMPILE_FAILED", () => {
+  const error = compileError(() =>
+    compile(
+      trajectory([{ method: "fill", arguments: { value: "Ada" } }]),
+      options,
+    ),
+  );
+
+  expect(error.code).toBe("FLOW_COMPILE_FAILED");
+  expect(error.message).toContain("locator");
+});
+
+test("a keys-kind press with no locator compiles to a focused keyboard press", () => {
+  const flow = compile(
+    trajectory([{ method: "press", kind: "keys", arguments: ["Enter"] }]),
+    options,
+  );
+
+  expect(flow.steps).toHaveLength(1);
+  expect(flow.steps[0]).toMatchObject({
+    action: "press",
+    value: "Enter",
+    intent: "Press Enter",
+  });
+  expect(flow.steps[0]).not.toHaveProperty("locator");
+  expect(parseFlowSpec(flow)).toEqual(flow);
+});
+
+test("an act-kind press without a locator throws FLOW_COMPILE_FAILED", () => {
+  const error = compileError(() =>
+    compile(
+      trajectory([{ method: "press", kind: "act", arguments: ["Enter"] }]),
+      options,
+    ),
+  );
+
+  expect(error.code).toBe("FLOW_COMPILE_FAILED");
+  expect(error.message).toContain("locator");
+});
+
+test("click, hover, check, and select still require a locator", () => {
+  for (const method of ["click", "hover", "check", "select"] as const) {
+    const error = compileError(() =>
+      compile(
+        trajectory([
+          {
+            method,
+            ...(method === "select" ? { arguments: { value: "blue" } } : {}),
+          },
+        ]),
+        options,
+      ),
+    );
+    expect(error.code).toBe("FLOW_COMPILE_FAILED");
+    if (method === "hover") {
+      expect(error.message).toContain("hover");
+    } else {
+      expect(error.message).toContain("locator");
+    }
+  }
 });

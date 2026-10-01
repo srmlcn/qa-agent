@@ -103,7 +103,7 @@ function compileAction(
     semanticFallback,
   };
 
-  return toStep(flowAction, identity, locator, value, flowId, action.index);
+  return toStep(flowAction, identity, locator, value, flowId, action);
 }
 
 function toStep(
@@ -112,8 +112,9 @@ function toStep(
   locator: Locator | undefined,
   value: string | undefined,
   flowId: string,
-  index: number,
+  action: DiscoveryAction,
 ): Step {
+  const index = action.index;
   switch (flowAction) {
     case "click":
     case "check":
@@ -124,7 +125,33 @@ function toStep(
         requiredLocator(locator, flowId, identity.id, index),
       );
     case "fill":
+      if (locator === undefined && isFocusedType(action)) {
+        return seal({
+          ...identity,
+          action: "fill",
+          value: requiredValue(value, flowAction, flowId, identity.id, index),
+        });
+      }
+      return valuedStep(
+        "fill",
+        identity,
+        requiredLocator(locator, flowId, identity.id, index),
+        requiredValue(value, flowAction, flowId, identity.id, index),
+      );
     case "press":
+      if (locator === undefined && isKeysKind(action)) {
+        return seal({
+          ...identity,
+          action: "press",
+          value: requiredValue(value, flowAction, flowId, identity.id, index),
+        });
+      }
+      return valuedStep(
+        "press",
+        identity,
+        requiredLocator(locator, flowId, identity.id, index),
+        requiredValue(value, flowAction, flowId, identity.id, index),
+      );
     case "select":
       return valuedStep(
         flowAction,
@@ -283,10 +310,24 @@ function targetLabel(
   if (locator !== undefined) {
     return locatorTarget(locator);
   }
-  if (flowAction === "waitFor" && value !== undefined) {
+  if (
+    (flowAction === "press" || flowAction === "fill" || flowAction === "waitFor") &&
+    value !== undefined
+  ) {
     return value;
   }
   return "";
+}
+
+/** Stagehand `keys` types into the focused element and does not record a locator. */
+function isFocusedType(action: DiscoveryAction): boolean {
+  const method = action.method?.trim().toLowerCase();
+  return method === "type" || isKeysKind(action);
+}
+
+/** Stagehand `keys` presses the focused element and does not record a locator. */
+function isKeysKind(action: DiscoveryAction): boolean {
+  return action.kind.trim().toLowerCase() === "keys";
 }
 
 function locatorTarget(locator: Locator): string {
@@ -310,7 +351,9 @@ function actionValue(
   action: DiscoveryAction,
   flowAction: FlowAction,
 ): string | undefined {
-  const fromArguments = valueFromArguments(action.arguments);
+  const fromArguments = preservesKeyboardText(action, flowAction)
+    ? verbatimFromArguments(action.arguments)
+    : valueFromArguments(action.arguments);
   if (fromArguments !== undefined) {
     return fromArguments;
   }
@@ -318,6 +361,54 @@ function actionValue(
     return nonEmptyString(action.urlAfter) ?? nonEmptyString(action.urlBefore);
   }
   return undefined;
+}
+
+/** Focused `keys` / `type` values keep surrounding spaces. */
+function preservesKeyboardText(
+  action: DiscoveryAction,
+  flowAction: FlowAction,
+): boolean {
+  if (flowAction !== "fill" && flowAction !== "press") {
+    return false;
+  }
+  const method = action.method?.trim().toLowerCase();
+  return isKeysKind(action) || method === "type";
+}
+
+function verbatimFromArguments(value: unknown): string | undefined {
+  const direct = verbatimScalar(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const scalar = verbatimScalar(item);
+      if (scalar !== undefined) {
+        return scalar;
+      }
+    }
+    return undefined;
+  }
+  if (!isPlainRecord(value)) {
+    return undefined;
+  }
+  for (const key of VALUE_KEYS) {
+    const scalar = verbatimScalar(value[key]);
+    if (scalar !== undefined) {
+      return scalar;
+    }
+  }
+  return undefined;
+}
+
+function verbatimScalar(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+  return value;
 }
 
 function valueFromArguments(value: unknown): string | undefined {
