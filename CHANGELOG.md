@@ -1,3 +1,30 @@
+## [1.1.4](https://github.com/srmlcn/qa-agent/compare/v1.1.3...v1.1.4) (2026-10-01)
+
+
+### Bug Fixes
+
+* **flows:** disambiguate duplicate text locators ([79d1b17](https://github.com/srmlcn/qa-agent/commit/79d1b179332f9c44e0519312252f7a8005f0185f))
+* **flows:** replay focused keyboard press and type ([d6074d5](https://github.com/srmlcn/qa-agent/commit/d6074d585ca04141a2f6150211fd0f7de1b308a1))
+* **flows:** require keys for bare press ([a9efcbf](https://github.com/srmlcn/qa-agent/commit/a9efcbf5961d5e60243a0d867538d814c67ab407))
+* **flows:** skip hidden locators during discovery ([c0c3332](https://github.com/srmlcn/qa-agent/commit/c0c3332695f89ba6890ed6c17b677acf7f956725))
+* **playwright:** check locator-backed waits ([704a68e](https://github.com/srmlcn/qa-agent/commit/704a68eb5102735049b21c1bbc7e6b7bee31a758))
+* **playwright:** ignore generic widget roles ([63786eb](https://github.com/srmlcn/qa-agent/commit/63786eb5b079c338d661626d1180a2cfa86ef6fa))
+* **playwright:** reject hidden field fallback ([6870d6f](https://github.com/srmlcn/qa-agent/commit/6870d6f89e1b2880e65d9d5fadaf1438dc21c303))
+* **playwright:** reject unchecked locators ([9b890d0](https://github.com/srmlcn/qa-agent/commit/9b890d097fd99319eb9b42245055be9b1abfe73a))
+* **playwright:** require recorded page URL for locator checks ([ee61a68](https://github.com/srmlcn/qa-agent/commit/ee61a68e5cfb29e0df1fc55ca2f128cbabc6471b))
+* **playwright:** search only widget containers ([0686215](https://github.com/srmlcn/qa-agent/commit/06862151cf1aedcfae4d2535fde1708f974281b2))
+* **playwright:** separate same-url documents ([f817f5f](https://github.com/srmlcn/qa-agent/commit/f817f5f22f368843987327aec1731443a42381c2))
+* **playwright:** skip cross-page matches ([5ee2249](https://github.com/srmlcn/qa-agent/commit/5ee2249b638e2cb69739a86acb774288f45add15))
+* **playwright:** split epochs on navigation ([5bd3b00](https://github.com/srmlcn/qa-agent/commit/5bd3b006c8572d1977e32a82671883722d749210))
+* **stagehand:** bound repeats and key text ([0267b65](https://github.com/srmlcn/qa-agent/commit/0267b657ee06778268054bc8047664d92563c4bd))
+* **stagehand:** cancel locator resolution ([0538b89](https://github.com/srmlcn/qa-agent/commit/0538b8934e5434755fd58576509f418798173f32))
+* **stagehand:** keep fillform page urls ([879d257](https://github.com/srmlcn/qa-agent/commit/879d2578e281244d0965d2433cc121fd108f1c48))
+* **stagehand:** keep v3 tool actions in trajectory ([0a2cdc9](https://github.com/srmlcn/qa-agent/commit/0a2cdc96755851d5a2da76af76d518c5a265faf2))
+* **stagehand:** name unrecognized tool records ([402fbfa](https://github.com/srmlcn/qa-agent/commit/402fbfa7c2014b80e8c82b92a8ac542d33e1f395))
+* **stagehand:** read verifier tool output ([2931d01](https://github.com/srmlcn/qa-agent/commit/2931d01ebd0145758377d4ad8ef8a2b2f359d361))
+* **stagehand:** reject unknown tool names ([e260c3a](https://github.com/srmlcn/qa-agent/commit/e260c3ad3f356fc839f2c0d1c318e3d877e6faa5))
+* **stagehand:** resolve locators on live page ([fdbb286](https://github.com/srmlcn/qa-agent/commit/fdbb2866cdb99aa33a7bd7464b72fec9d2725a7b))
+
 ## [1.1.3](https://github.com/srmlcn/qa-agent/compare/v1.1.2...v1.1.3) (2026-10-01)
 
 
