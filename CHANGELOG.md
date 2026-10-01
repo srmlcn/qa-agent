@@ -1,3 +1,13 @@
+## [1.1.3](https://github.com/srmlcn/qa-agent/compare/v1.1.2...v1.1.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* **orchestrator:** apply auth on discovery ([cbae51b](https://github.com/srmlcn/qa-agent/commit/cbae51bd681e52fdc9bd46856f5441ae9167d5b2))
+* **playwright:** expose loopback CDP port ([ad99dcd](https://github.com/srmlcn/qa-agent/commit/ad99dcd44bcee0d379e6a1e97b5010040130770c))
+* **playwright:** require debugger port match ([88297a5](https://github.com/srmlcn/qa-agent/commit/88297a5c883da67499701eb3fd5ee96929a538dd))
+* **stagehand:** attach the v3 discovery agent ([6a44447](https://github.com/srmlcn/qa-agent/commit/6a44447f060bbfd24bd5792a8a57bb23d5572b51))
+
 ## [1.1.2](https://github.com/srmlcn/qa-agent/compare/v1.1.1...v1.1.2) (2026-10-01)
 
 
