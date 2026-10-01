@@ -139,7 +139,7 @@ function toStep(
         requiredValue(value, flowAction, flowId, identity.id, index),
       );
     case "press":
-      if (locator === undefined) {
+      if (locator === undefined && isKeysKind(action)) {
         return seal({
           ...identity,
           action: "press",
@@ -322,7 +322,12 @@ function targetLabel(
 /** Stagehand `keys` types into the focused element and does not record a locator. */
 function isFocusedType(action: DiscoveryAction): boolean {
   const method = action.method?.trim().toLowerCase();
-  return method === "type" || action.kind.trim().toLowerCase() === "keys";
+  return method === "type" || isKeysKind(action);
+}
+
+/** Stagehand `keys` presses the focused element and does not record a locator. */
+function isKeysKind(action: DiscoveryAction): boolean {
+  return action.kind.trim().toLowerCase() === "keys";
 }
 
 function locatorTarget(locator: Locator): string {

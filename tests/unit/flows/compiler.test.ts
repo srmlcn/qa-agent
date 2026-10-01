@@ -611,8 +611,36 @@ test("a locator fill without a locator throws FLOW_COMPILE_FAILED", () => {
   expect(error.message).toContain("locator");
 });
 
-test("click, check, and select still require a locator", () => {
-  for (const method of ["click", "check", "select"] as const) {
+test("a keys-kind press with no locator compiles to a focused keyboard press", () => {
+  const flow = compile(
+    trajectory([{ method: "press", kind: "keys", arguments: ["Enter"] }]),
+    options,
+  );
+
+  expect(flow.steps).toHaveLength(1);
+  expect(flow.steps[0]).toMatchObject({
+    action: "press",
+    value: "Enter",
+    intent: "Press Enter",
+  });
+  expect(flow.steps[0]).not.toHaveProperty("locator");
+  expect(parseFlowSpec(flow)).toEqual(flow);
+});
+
+test("an act-kind press without a locator throws FLOW_COMPILE_FAILED", () => {
+  const error = compileError(() =>
+    compile(
+      trajectory([{ method: "press", kind: "act", arguments: ["Enter"] }]),
+      options,
+    ),
+  );
+
+  expect(error.code).toBe("FLOW_COMPILE_FAILED");
+  expect(error.message).toContain("locator");
+});
+
+test("click, hover, check, and select still require a locator", () => {
+  for (const method of ["click", "hover", "check", "select"] as const) {
     const error = compileError(() =>
       compile(
         trajectory([
@@ -625,6 +653,10 @@ test("click, check, and select still require a locator", () => {
       ),
     );
     expect(error.code).toBe("FLOW_COMPILE_FAILED");
-    expect(error.message).toContain("locator");
+    if (method === "hover") {
+      expect(error.message).toContain("hover");
+    } else {
+      expect(error.message).toContain("locator");
+    }
   }
 });
