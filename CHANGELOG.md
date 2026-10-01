@@ -1,3 +1,10 @@
+## [1.1.6](https://github.com/srmlcn/qa-agent/compare/v1.1.5...v1.1.6) (2026-10-01)
+
+
+### Bug Fixes
+
+* **playwright:** keep hash routes distinct ([6f64b85](https://github.com/srmlcn/qa-agent/commit/6f64b853929988aa70d554853d9bd47ab86a2725))
+
 ## [1.1.5](https://github.com/srmlcn/qa-agent/compare/v1.1.4...v1.1.5) (2026-10-01)
 
 
