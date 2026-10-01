@@ -271,7 +271,7 @@ async function readVersionWebsocket(
     if (!response.ok) {
       return undefined;
     }
-    return loopbackWebsocket(await response.json());
+    return loopbackWebsocket(await response.json(), port);
   } catch {
     if (signal?.aborted) {
       throw cancelled();
@@ -280,7 +280,7 @@ async function readVersionWebsocket(
   }
 }
 
-function loopbackWebsocket(body: unknown): string | undefined {
+function loopbackWebsocket(body: unknown, expectedPort: number): string | undefined {
   if (typeof body !== "object" || body === null || !("webSocketDebuggerUrl" in body)) {
     return undefined;
   }
@@ -291,7 +291,11 @@ function loopbackWebsocket(body: unknown): string | undefined {
   try {
     const parsed = new URL(value);
     const websocket = parsed.protocol === "ws:" || parsed.protocol === "wss:";
-    if (!websocket || !isLoopbackHost(parsed.hostname)) {
+    if (
+      !websocket ||
+      !isLoopbackHost(parsed.hostname) ||
+      parsed.port !== String(expectedPort)
+    ) {
       return undefined;
     }
     return value;
