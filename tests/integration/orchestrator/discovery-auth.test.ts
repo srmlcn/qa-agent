@@ -53,12 +53,13 @@ test(
     let app: AuthApp | undefined;
     let llm: { url: string; close: () => Promise<void> } | undefined;
     const prompts: string[] = [];
-    let portsDuringModelCall: string[] = [];
+    let sessionDebugger: SessionDebugger | undefined;
     try {
       app = await start(0);
-      llm = await startLlm((body) => {
+      const startUrl = `${app.url}/app`;
+      llm = await startLlm(async (body) => {
         prompts.push(body);
-        portsDuringModelCall = debuggerPorts();
+        sessionDebugger = await findDebuggerServing(startUrl);
       });
       const projectRoot = join(home, "project");
       const config = projectConfig(app.url);
@@ -74,8 +75,6 @@ test(
         config,
       });
       const storageState = readProfilePath(PROJECT_ID, PROFILE);
-      const startUrl = `${app.url}/app`;
-      const portsBefore = debuggerPorts();
       const controller = new AbortController();
 
       const error = await rejected(
@@ -93,8 +92,11 @@ test(
       expect(error.code).toBe("DISCOVERY_FAILED");
       expect(error.message).toContain("Discovery stopped");
       expect(prompts.join("\n")).toContain(startUrl);
-      expect(portsDuringModelCall).toHaveLength(portsBefore.length + 1);
-      expect(debuggerPorts()).toEqual(portsBefore);
+      expect(sessionDebugger).toBeDefined();
+      if (sessionDebugger === undefined) {
+        return;
+      }
+      expect(await sessionDebuggerGone(sessionDebugger)).toBe(true);
 
       const discovered = await discoverFlow({
         id: "page.options",
@@ -118,7 +120,7 @@ test(
       expect(discovered.flow.state).toBe("validated");
       expect(discovered.flow.authProfile).toBe(PROFILE);
       expect(discovered.result.status).toBe("passed");
-      expect(debuggerPorts()).toEqual(portsBefore);
+      expect(await sessionDebuggerGone(sessionDebugger)).toBe(true);
     } finally {
       await llm?.close();
       await app?.close();
@@ -191,7 +193,7 @@ function projectConfig(baseUrl: string): ProjectConfig {
 }
 
 function startLlm(
-  onBody: (body: string) => void,
+  onBody: (body: string) => void | Promise<void>,
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -199,9 +201,16 @@ function startLlm(
       chunks.push(chunk);
     });
     request.on("end", () => {
-      onBody(Buffer.concat(chunks).toString("utf8"));
-      response.writeHead(400, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { message: "unavailable" } }));
+      void (async () => {
+        try {
+          await onBody(Buffer.concat(chunks).toString("utf8"));
+        } finally {
+          if (!response.writableEnded) {
+            response.writeHead(400, { "content-type": "application/json" });
+            response.end(JSON.stringify({ error: { message: "unavailable" } }));
+          }
+        }
+      })();
     });
   });
   return new Promise((resolve, reject) => {
@@ -232,25 +241,112 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
-function debuggerPorts(): string[] {
+type SessionDebugger = {
+  pid: number;
+  port: string;
+  webSocketDebuggerUrl: string;
+};
+
+/**
+ * The browser this discovery session attached. Identified by the page at
+ * `targetUrl`, which is unique to this test's auth fixture.
+ */
+async function findDebuggerServing(
+  targetUrl: string,
+): Promise<SessionDebugger | undefined> {
+  for (const entry of debuggerProcesses()) {
+    try {
+      const list = await fetch(`http://127.0.0.1:${entry.port}/json/list`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (!list.ok) {
+        continue;
+      }
+      const targets = (await list.json()) as Array<{ url?: string }>;
+      if (!targets.some((target) => target.url === targetUrl)) {
+        continue;
+      }
+      const version = await fetch(`http://127.0.0.1:${entry.port}/json/version`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (!version.ok) {
+        continue;
+      }
+      const body = (await version.json()) as { webSocketDebuggerUrl?: string };
+      if (typeof body.webSocketDebuggerUrl !== "string") {
+        continue;
+      }
+      return {
+        pid: entry.pid,
+        port: entry.port,
+        webSocketDebuggerUrl: body.webSocketDebuggerUrl,
+      };
+    } catch {
+      // A browser from another file can exit while this probe is in flight.
+    }
+  }
+  return undefined;
+}
+
+/** This session's process and debugger endpoint are gone. */
+async function sessionDebuggerGone(session: SessionDebugger): Promise<boolean> {
+  if (processExists(session.pid)) {
+    return false;
+  }
+  try {
+    const version = await fetch(`http://127.0.0.1:${session.port}/json/version`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    if (!version.ok) {
+      return true;
+    }
+    const body = (await version.json()) as { webSocketDebuggerUrl?: string };
+    return body.webSocketDebuggerUrl !== session.webSocketDebuggerUrl;
+  } catch {
+    return true;
+  }
+}
+
+function debuggerProcesses(): Array<{ pid: number; port: string }> {
   let output = "";
   try {
-    output = execFileSync("ps", ["-A", "-o", "command="], { encoding: "utf8" });
+    output = execFileSync("ps", ["-A", "-o", "pid=,command="], {
+      encoding: "utf8",
+    });
   } catch {
     return [];
   }
-  const ports = new Set<string>();
+  const found: Array<{ pid: number; port: string }> = [];
   for (const line of output.split("\n")) {
     if (!line.includes("chrome")) {
       continue;
     }
     const match = /--remote-debugging-port=(\d+)/.exec(line);
     const port = match?.[1];
-    if (port !== undefined) {
-      ports.add(port);
+    const pidText = line.trim().split(/\s+/, 1)[0];
+    if (port === undefined || pidText === undefined) {
+      continue;
     }
+    const pid = Number(pidText);
+    if (!Number.isInteger(pid)) {
+      continue;
+    }
+    found.push({ pid, port });
   }
-  return [...ports].sort();
+  return found;
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? error.code
+        : undefined;
+    return code === "EPERM";
+  }
 }
 
 function restoreEnv(name: string, value: string | undefined): void {
