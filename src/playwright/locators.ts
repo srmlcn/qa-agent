@@ -348,11 +348,12 @@ function locatorLabel(locator: FlowLocator): string {
 
 function needsLocatorCheck(action: DiscoveryAction): boolean {
   const token = (action.method ?? action.kind).trim().toLowerCase();
+  if (token === "goto" || token === "reload") {
+    return false;
+  }
   if (
-    token === "goto" ||
-    token === "reload" ||
-    token === "wait" ||
-    token === "waitfor"
+    (token === "wait" || token === "waitfor") &&
+    locatorCandidates(action).length === 0
   ) {
     return false;
   }

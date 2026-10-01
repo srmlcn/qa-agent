@@ -230,6 +230,40 @@ test("a locator without a recorded page is not verified against the final page",
   }
 });
 
+test("a locator-backed wait that matches nothing fails closed", async () => {
+  await show(hiddenSelectHtml);
+  const pending = resolveTrajectoryLocators(session.page, trajectory([
+    {
+      index: 0,
+      kind: "wait",
+      method: "waitFor",
+      selector: "#missing",
+      urlBefore: "about:blank",
+      urlAfter: "about:blank",
+      arguments: {},
+    },
+  ]));
+
+  await expect(pending).rejects.toMatchObject({ code: "FLOW_COMPILE_FAILED" });
+  await expect(pending).rejects.toThrow(/matched no elements/);
+});
+
+test("a timer wait without a locator is not probed", async () => {
+  await show(hiddenSelectHtml);
+  const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+    {
+      index: 0,
+      kind: "wait",
+      method: "waitFor",
+      urlBefore: "about:blank",
+      urlAfter: "about:blank",
+      arguments: { value: "500" },
+    },
+  ]));
+
+  expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+});
+
 test("a locator that matches nothing fails closed", async () => {
   await show(hiddenSelectHtml);
   const pending = resolveTrajectoryLocators(session.page, trajectory([
