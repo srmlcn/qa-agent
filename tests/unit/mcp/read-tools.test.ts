@@ -68,7 +68,7 @@ test("qa.list_flows returns one metadata object and no steps", async () => {
   const projectRoot = createProjectRoot();
   save(projectRoot, sampleFlow());
 
-  const listed = await withCwd(projectRoot, () => callJson("qa.list_flows", {}));
+  const listed = await withCwd(projectRoot, () => callJson("qa.list_flows", { projectRoot }));
   expect(listed).toEqual([
     {
       id: "project.archive",
@@ -140,7 +140,7 @@ test("qa.status does not include a fixture API key from the environment", async 
   process.env[API_KEY_ENV] = FIXTURE_API_KEY;
 
   try {
-    const ready = await withCwd(projectRoot, () => callJson("qa.status", {}));
+    const ready = await withCwd(projectRoot, () => callJson("qa.status", { projectRoot }));
     expect(ready).toMatchObject({
       packageVersion: version,
       nodeOk: true,
@@ -165,7 +165,7 @@ test("qa.status does not include a fixture API key from the environment", async 
     }
 
     delete process.env[API_KEY_ENV];
-    const missingKey = await withCwd(projectRoot, () => callJson("qa.status", {}));
+    const missingKey = await withCwd(projectRoot, () => callJson("qa.status", { projectRoot }));
     expect(missingKey).toMatchObject({
       configOk: true,
       llmOk: false,

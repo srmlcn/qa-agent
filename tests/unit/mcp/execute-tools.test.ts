@@ -141,6 +141,7 @@ test("qa.execute_flow calls executeFlow once and forwards collectTrace false", a
       collectTrace: false,
       model: "company-ui-agent",
       objective: "Archive a project",
+      projectRoot,
     }),
   );
 
@@ -168,6 +169,7 @@ test("qa.execute_flow omits failure when the run has none", async () => {
   const output = await withCwd(projectRoot, () =>
     executeFlowTool.handler({
       flowId: "project.archive",
+      projectRoot,
     }),
   );
 
@@ -202,6 +204,7 @@ test("qa.execute_suite calls executeSuite once with shared auth and no workers",
       flowIds: ["project.archive", "project.restore"],
       model: "company-ui-agent",
       objective: "Run the suite",
+      projectRoot,
     }),
   );
 
@@ -227,6 +230,7 @@ test("qa.execute_suite forwards workers and per-worker auth", async () => {
       flowIds: ["project.archive"],
       workers: 2,
       authStrategy: "per-worker",
+      projectRoot,
     }),
   );
 

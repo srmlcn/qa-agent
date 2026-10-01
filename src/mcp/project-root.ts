@@ -5,28 +5,36 @@ import { loadEffectiveConfig } from "../config/effective.js";
 import type { ProjectConfig } from "../config/schema.js";
 import { QaError } from "../errors/qa-error.js";
 
-export type RootLister = () => Promise<readonly string[]>;
+/**
+ * `supported: false` means the client cannot list roots.
+ * `supported: true` with an empty `roots` array is a real empty workspace.
+ */
+export type ListedRoots =
+  | { readonly supported: false }
+  | { readonly supported: true; readonly roots: readonly string[] };
+
+export type RootLister = () => Promise<ListedRoots>;
 
 type RootsClient = {
   listRoots?: () => Promise<{ roots?: readonly { uri?: string }[] }>;
 };
 
-const emptyRoots: RootLister = async () => [];
+const unsupportedRoots: RootLister = async () => ({ supported: false });
 
-let rootLister: RootLister = emptyRoots;
+let rootLister: RootLister = unsupportedRoots;
 
 export function setRootLister(lister: RootLister): void {
   rootLister = lister;
 }
 
 export function resetRootLister(): void {
-  rootLister = emptyRoots;
+  rootLister = unsupportedRoots;
 }
 
 export function rootListerFromClient(client: RootsClient): RootLister {
   return async () => {
     if (client.listRoots === undefined) {
-      return [];
+      return { supported: false };
     }
     try {
       const listed = await client.listRoots();
@@ -37,32 +45,40 @@ export function rootListerFromClient(client: RootsClient): RootLister {
           paths.push(path);
         }
       }
-      return paths;
-    } catch {
-      return [];
+      return { supported: true, roots: paths };
+    } catch (error) {
+      // The SDK rejects roots/list before the client when capabilities.roots
+      // is absent. Any other failure is not proof that roots are unsupported.
+      if (isMissingRootsCapability(error)) {
+        return { supported: false };
+      }
+      throw blocked("Workspace root discovery failed");
     }
   };
 }
 
 /**
  * Picks the repo for one tool call.
- * An explicit path must sit inside a client root.
- * One client root is used as-is.
+ * An explicit path must sit inside an advertised client root.
+ * One advertised root is used as-is.
  * Several roots resolve to the single root that contains `.autonomous-qa`.
- * With no client roots, the process working directory is the fallback.
+ * When the client cannot list roots, the caller must supply projectRoot.
  */
 export async function resolveProjectRoot(explicit: string | undefined): Promise<string> {
-  const roots = await rootLister();
+  const listed = await rootLister();
+  if (!listed.supported) {
+    return rootWithoutDiscovery(explicit);
+  }
   if (explicit !== undefined) {
-    return explicitRoot(explicit, roots);
+    return explicitRoot(explicit, listed.roots);
   }
-  if (roots.length === 1) {
-    return roots[0] ?? resolve(process.cwd());
+  if (listed.roots.length === 1) {
+    return requiredRoot(listed.roots[0]);
   }
-  if (roots.length > 1) {
-    return configuredRoot(roots);
+  if (listed.roots.length > 1) {
+    return configuredRoot(listed.roots);
   }
-  return resolve(process.cwd());
+  throw blocked("There is no workspace root");
 }
 
 export async function loadToolConfig(
@@ -73,6 +89,15 @@ export async function loadToolConfig(
     projectRoot,
     config: loadEffectiveConfig(projectRoot).config,
   };
+}
+
+function rootWithoutDiscovery(explicit: string | undefined): string {
+  if (explicit === undefined) {
+    throw blocked(
+      "The client does not support workspace-root discovery and projectRoot is required",
+    );
+  }
+  return resolve(explicit);
 }
 
 function explicitRoot(explicit: string, roots: readonly string[]): string {
@@ -89,12 +114,19 @@ function explicitRoot(explicit: string, roots: readonly string[]): string {
 function configuredRoot(roots: readonly string[]): string {
   const matches = roots.filter((root) => hasOverrideDirectory(root));
   if (matches.length === 1) {
-    return matches[0] ?? roots[0] ?? resolve(process.cwd());
+    return requiredRoot(matches[0]);
   }
   const noun = matches.length === 0
     ? "No workspace root contains .autonomous-qa"
     : "Multiple workspace roots contain .autonomous-qa";
   throw blocked(`${noun}. Candidates: ${roots.join(", ")}`);
+}
+
+function requiredRoot(root: string | undefined): string {
+  if (root === undefined) {
+    throw blocked("There is no workspace root");
+  }
+  return root;
 }
 
 function hasOverrideDirectory(root: string): boolean {
@@ -129,6 +161,13 @@ function pathFromRootUri(uri: string | undefined): string | undefined {
     return fileURLToPath(uri);
   }
   return resolve(uri);
+}
+
+function isMissingRootsCapability(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("does not support roots capability")
+  );
 }
 
 function blocked(message: string): QaError {
