@@ -27,6 +27,11 @@ export type DiscoverOptions = {
   provider: LlmProvider;
   maxSteps: number;
   signal?: AbortSignal;
+  /**
+   * Playwright storage-state path. Applied to the browser Stagehand attaches
+   * to, before discovery navigation. This module does not resolve profiles.
+   */
+  storageState?: string;
   /** When omitted, a local Stagehand session runs in DOM mode. */
   client?: DiscoverySessionClient;
 };
@@ -154,6 +159,10 @@ async function runStagehand(
     headless: options.config.playwright.headless,
     timeoutMs: options.config.playwright.timeoutMs,
     signal,
+    remoteDebugging: true,
+    ...(options.storageState === undefined
+      ? {}
+      : { storageState: options.storageState }),
   });
   resources.browser = {
     close: () => browserSession.close(),
@@ -162,7 +171,14 @@ async function runStagehand(
     throw cancelled();
   }
 
-  const stagehand = createStagehand(options.provider, browserSession.browser);
+  const cdpUrl = browserSession.cdpUrl;
+  if (cdpUrl === undefined) {
+    throw new QaError({
+      code: "BROWSER_CRASHED",
+      message: "Chromium did not expose a loopback websocket debugger URL.",
+    });
+  }
+  const stagehand = createStagehand(options.provider, cdpUrl);
   resources.stagehand = {
     close: () => stagehand.close(),
   };
