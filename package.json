@@ -18,6 +18,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.53",
     "@browserbasehq/stagehand": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.20.0",
     "openai": "^4.104.0",
