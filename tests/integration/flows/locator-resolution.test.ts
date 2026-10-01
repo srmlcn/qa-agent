@@ -212,6 +212,72 @@ test("a locator recorded on another page is not verified against this page", asy
   }
 });
 
+test("a hash route is not the same page as another hash on that URL", async () => {
+  const served = await serveHtml(hiddenSelectHtml);
+  try {
+    const list = `${served.url}#/invoices`;
+    const edit = `${served.url}#/invoices/1/edit`;
+    await session.page.goto(edit);
+    const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: list,
+      }),
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: edit,
+      }),
+    ]));
+
+    expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[1]?.resolvedLocator).toBeDefined();
+    const verified = resolved.actions[1]?.resolvedLocator;
+    if (verified === undefined) {
+      throw new Error("expected the current hash route to be verified");
+    }
+    expect(await toLocator(session.page, verified).evaluate((element) => element.id)).toBe(
+      "visible-placeholder",
+    );
+  } finally {
+    await served.close();
+  }
+});
+
+test("a return to the same hash route is not the earlier document", async () => {
+  const served = await serveHtml(hiddenSelectHtml);
+  try {
+    const list = `${served.url}#/invoices`;
+    const edit = `${served.url}#/invoices/1/edit`;
+    await session.page.goto(list);
+    const resolved = await resolveTrajectoryLocators(session.page, trajectory([
+      {
+        ...clickAction({
+          selector: "#visible-placeholder",
+          urlBefore: list,
+        }),
+        urlAfter: edit,
+      },
+      {
+        ...clickAction({
+          selector: "#visible-placeholder",
+          urlBefore: edit,
+        }),
+        urlAfter: list,
+      },
+      clickAction({
+        selector: "#visible-placeholder",
+        urlBefore: list,
+      }),
+    ]));
+
+    expect(resolved.actions[0]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[1]?.resolvedLocator).toBeUndefined();
+    expect(resolved.actions[2]?.resolvedLocator).toBeDefined();
+  } finally {
+    await served.close();
+  }
+});
+
 test("a return to the same URL is not the earlier document", async () => {
   const served = await serveHtml(hiddenSelectHtml);
   try {
