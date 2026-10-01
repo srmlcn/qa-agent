@@ -71,6 +71,7 @@ export async function discoverFlow(
     provider: input.provider,
     maxSteps: input.maxSteps ?? input.config.stagehand.maxSteps,
     signal,
+    ...(storageState === undefined ? {} : { storageState }),
     ...(input.client === undefined ? {} : { client: input.client }),
   });
 
